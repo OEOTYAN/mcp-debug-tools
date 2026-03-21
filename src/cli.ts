@@ -94,7 +94,7 @@ const program = new Command()
 program
     .name('mcp-debug-tools')
     .description('CLI and MCP proxy for VSCode debugging via DAP')
-    .version('1.0.1')
+    .version('1.0.2')
     .option('--port <number>', 'DAP Proxy 서버 포트 지정 (자동 탐색 비활성화)')
     .option('--domain <url>', 'DAP Proxy 서버 도메인', 'http://localhost')
     .option('--no-auto', '자동 VSCode 탐색 비활성화')

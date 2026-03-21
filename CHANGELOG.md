@@ -6,6 +6,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Released]
 
+## [1.0.2] - 2026-03-21
+
+### Fixed
+- **`npx @uhd_kr/mcp-debug-tools` command not found** — Removed VS Code extension-specific fields (`engines.vscode`, `activationEvents`, `contributes`) from npm package manifest that caused npm 11 to invalidate the `bin` entry. npm-only package now uses `engines.node` instead.
+
 ## [1.0.1] - 2026-03-21
 
 ### Fixed
