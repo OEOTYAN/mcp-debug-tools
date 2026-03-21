@@ -6,6 +6,11 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Released]
 
+## [1.0.1] - 2026-03-21
+
+### Fixed
+- **`npx @uhd_kr/mcp-debug-tools` command not found** — npm was silently removing the `bin` entry during publish for scoped packages. Fixed by using explicit object format in the `bin` field.
+
 ## [1.0.0] - 2026-03-21
 
 ### 🤖 AI Agent Skill Auto-Injection
