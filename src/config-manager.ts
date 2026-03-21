@@ -23,14 +23,16 @@ export interface WorkspaceConfig {
 export class ConfigManager {
     private configDir: string
     private configPath: string
+    private extensionPath: string
     
-    constructor(private workspaceFolder: vscode.WorkspaceFolder | undefined) {
+    constructor(private workspaceFolder: vscode.WorkspaceFolder | undefined, extensionPath: string) {
         if (!workspaceFolder) {
             throw new Error('No workspace folder found')
         }
         
         this.configDir = path.join(workspaceFolder.uri.fsPath, '.mcp-debug-tools')
         this.configPath = path.join(this.configDir, 'config.json')
+        this.extensionPath = extensionPath
     }
     
     /**
@@ -53,10 +55,45 @@ export class ConfigManager {
             // 파일 저장
             await this.saveConfig(config)
             
+            // 스킬 문서(CLI 가이드) 복사 주입
+            await this.injectSkillDocument()
+            
             console.log(`Config file created at: ${this.configPath}`)
         } catch (error) {
             console.error('Failed to initialize config:', error)
             throw error
+        }
+    }
+    
+    /**
+     * AI CLI 가이드(SKILL) 문서를 워크스페이스에 복사하여 제공합니다.
+     * - .gemini/skills/dap-cli-debugging/SKILL.md (Gemini 에이전트 자동 인식용)
+     * - .claude/skills/dap-cli-debugging/SKILL.md (Claude Code 에이전트 자동 인식용)
+     */
+    private async injectSkillDocument(): Promise<void> {
+        const skillSourcePath = path.join(this.extensionPath, 'resources', 'skills', 'dap-cli-debugging.md')
+
+        if (!fs.existsSync(skillSourcePath)) {
+            console.warn(`SKILL document source not found at: ${skillSourcePath}`)
+            return
+        }
+
+        const content = await readFile(skillSourcePath, 'utf8')
+        const workspacePath = this.workspaceFolder!.uri.fsPath
+
+        const targets = [
+            path.join(workspacePath, '.gemini', 'skills', 'dap-cli-debugging', 'SKILL.md'),
+            path.join(workspacePath, '.claude', 'skills', 'dap-cli-debugging', 'SKILL.md'),
+        ]
+
+        for (const destPath of targets) {
+            try {
+                await mkdir(path.dirname(destPath), { recursive: true })
+                await writeFile(destPath, content, 'utf8')
+                console.log(`SKILL document injected at: ${destPath}`)
+            } catch (error) {
+                console.error(`Failed to inject SKILL document to ${destPath}:`, error)
+            }
         }
     }
     

@@ -108,11 +108,23 @@ async function stopServer() {
 }
 
 /**
+ * Helper to safely register a command
+ */
+function safeRegisterCommand(context: vscode.ExtensionContext, commandId: string, callback: (...args: any[]) => any) {
+    try {
+        const command = vscode.commands.registerCommand(commandId, callback)
+        context.subscriptions.push(command)
+    } catch (error) {
+        console.warn(`[Command] Command ${commandId} could not be registered (possibly already exists).`)
+    }
+}
+
+/**
  * Register all extension commands
  */
 export function registerCommands(context: vscode.ExtensionContext): void {
     // Command to add a breakpoint, does NOT require an active debug session
-    const addUnboundBreakpointCommand = vscode.commands.registerCommand('dap-proxy.addUnboundBreakpoint', async () => {
+    safeRegisterCommand(context, 'dap-proxy.addUnboundBreakpoint', async () => {
         const activeEditor = vscode.window.activeTextEditor
         if (!activeEditor) {
             vscode.window.showErrorMessage('No active text editor. Open a file and try again.')
@@ -141,20 +153,14 @@ export function registerCommands(context: vscode.ExtensionContext): void {
         vscode.window.showInformationMessage(`Breakpoint added to ${relativePath}:${lineNumber}`)
     })
 
-    context.subscriptions.push(addUnboundBreakpointCommand)
-
     // Command to open monitor panel
-    const openMonitorPanelCommand = vscode.commands.registerCommand('dap-proxy.openMonitorPanel', () => {
+    safeRegisterCommand(context, 'dap-proxy.openMonitorPanel', () => {
         createMonitoringPanel()
     })
 
-    context.subscriptions.push(openMonitorPanelCommand)
-
     // Command to start server
-    const startServerCommand = vscode.commands.registerCommand('dap-proxy.startServer', startServer)
-    context.subscriptions.push(startServerCommand)
+    safeRegisterCommand(context, 'dap-proxy.startServer', startServer)
 
     // Command to stop server
-    const stopServerCommand = vscode.commands.registerCommand('dap-proxy.stopServer', stopServer)
-    context.subscriptions.push(stopServerCommand)
+    safeRegisterCommand(context, 'dap-proxy.stopServer', stopServer)
 }

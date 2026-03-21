@@ -36,7 +36,7 @@ export async function activate(context: vscode.ExtensionContext) {
                 const workspaceFolder = vscode.workspace.workspaceFolders?.[0]
                 if (workspaceFolder) {
                     // ConfigManager 초기화
-                    configManager = new ConfigManager(workspaceFolder)
+                    configManager = new ConfigManager(workspaceFolder, context.extensionPath)
                     await configManager.initialize(state.currentPort || 3000)
                     
                     // 글로벌 레지스트리에 등록

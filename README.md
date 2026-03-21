@@ -1,28 +1,61 @@
 # MCP Debug Tools
 
-## 🔔 Important Notices
+> **The bridge between AI Agents and VS Code Debugger** — Let your AI assistant set breakpoints, step through code, and inspect variables in real-time.
 
-### 1. Timeout Error Fix (v0.2.0+)
-Fixed the timeout issue that occurred when starting the debug session. The connection to VSCode instances is now more stable with improved heartbeat and retry mechanisms.
+[![VS Code Marketplace](https://img.shields.io/badge/VS%20Code-Marketplace-blue)](https://marketplace.visualstudio.com/items?itemName=uhd.mcp-debug-tools)
+[![npm](https://img.shields.io/npm/v/@uhd_kr/mcp-debug-tools)](https://www.npmjs.com/package/@uhd_kr/mcp-debug-tools)
 
-### 2. Use `@latest` Tag for Installation
-When configuring MCP, always include the `@latest` tag to ensure you're using the most recent version:
-```json
-"args": [
-  "-y",
-  "@uhd_kr/mcp-debug-tools@latest"
-],
+## Why MCP Debug Tools?
+
+Traditional AI coding assistants can **read** and **write** code, but they can't **debug** it. MCP Debug Tools removes this limitation by giving AI agents direct access to VS Code's debugger through simple CLI commands.
+
+| Without MCP Debug Tools | With MCP Debug Tools |
+|------------------------|---------------------|
+| AI guesses at bugs from code reading | AI sets breakpoints and inspects live runtime state |
+| "Try adding a console.log here" | AI steps through code line-by-line automatically |
+| Manual copy-paste of error messages | AI reads call stacks and variable values as JSON |
+
+### 💡 Direct CLI Control — Works Without MCP Connection
+
+Beyond the standard MCP proxy, you can execute debugging actions via **one-off terminal commands** — no persistent connection required.
+
+- **Terminal AI Friendly**: Shell-based AI agents interact with the debugger directly
+- **Zero Connection Overhead**: No need to configure or maintain an MCP server connection
+- **Easy Parsing**: Results in pure JSON (`stdout`), logs separated to `stderr` — AI parses instantly
+- **Scriptable**: Integrate VS Code debugging into automated bash scripts seamlessly
+
+```bash
+# Discover all available tools
+npx @uhd_kr/mcp-debug-tools list
+
+# Execute tools directly
+npx @uhd_kr/mcp-debug-tools call add-breakpoint '{"file": "src/app.ts", "line": 15}'
+npx @uhd_kr/mcp-debug-tools call step-over
 ```
 
-A bridge solution that enables AI tools (Cursor, Windsurf, etc.) to access VSCode's debugging capabilities. Connects Model Context Protocol (MCP) with Debug Adapter Protocol (DAP) to allow AI to perform debugging tasks.
+## 🚀 What's New in v1.0.0
 
-## 📺 Demo Video: AI-Powered Debugging in Action
+### 🤖 AI Agent Skill Auto-Injection
+The extension now **automatically injects skill documents** into your workspace when activated, so AI agents can discover and use debugging tools **without any manual configuration**.
 
-Watch how MCP Debug Tools enables AI assistants to perform complex debugging tasks across multiple Node.js projects simultaneously. This demonstration showcases real-time variable inspection, multi-threaded debugging, and automated breakpoint management through natural language commands.
+| AI Platform | Auto-detected Path | Status |
+|-------------|-------------------|--------|
+| **Gemini** (Google) | `.gemini/skills/dap-cli-debugging/SKILL.md` | ✅ Supported |
+| **Claude Code** (Anthropic) | `.claude/skills/dap-cli-debugging/SKILL.md` | ✅ Supported |
 
-\[Loading...GIF\]
-[![MCP Debug Tools Demo](https://github.com/hwanyong/mcp-debug-tools/blob/main/docs/resources/Area_x24.gif)](https://www.youtube.com/watch?v=0lE4-jZ9hTQ)
-\(click go to Youtube\)
+### 🔌 Offline CLI Support
+Run the CLI directly from the VS Code extension's install path — **no internet or npx required**.
+
+```bash
+# macOS / Linux
+node ~/.vscode/extensions/uhd.mcp-debug-tools-*/out/cli.js call get-active-session
+
+# Windows (PowerShell)
+node "$env:USERPROFILE\.vscode\extensions\uhd.mcp-debug-tools-*\out\cli.js" call get-active-session
+```
+
+### 📖 Comprehensive Tool Documentation
+All **29 debugging tools** are now fully documented in the auto-injected skill file, organized by category with parameters and usage examples.
 
 ## ⚠️ Beta Testing
 
@@ -102,6 +135,27 @@ npx @uhd_kr/mcp-debug-tools --port=8891
 # Disable auto-discovery
 npx @uhd_kr/mcp-debug-tools --no-auto
 ```
+
+### Local Path Fallback (When npx is unavailable)
+
+If `npx` is unavailable (e.g., offline environment, network restrictions), you can run the CLI directly from the VS Code extension's install directory.
+
+**macOS / Linux:**
+```bash
+node ~/.vscode/extensions/uhd.mcp-debug-tools-*/out/cli.js <command> [args]
+```
+
+**Windows (PowerShell):**
+```powershell
+node "$env:USERPROFILE\.vscode\extensions\uhd.mcp-debug-tools-*\out\cli.js" <command> [args]
+```
+
+**Windows (CMD):**
+```cmd
+node "%USERPROFILE%\.vscode\extensions\uhd.mcp-debug-tools-*\out\cli.js" <command> [args]
+```
+
+> **Tip**: If you installed mcp-debug-tools globally via `npm install -g @uhd_kr/mcp-debug-tools`, you can simply run `mcp-debug-tools <command>` directly without `npx`.
 
 ## 🛠️ Supported Features
 

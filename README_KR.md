@@ -1,26 +1,61 @@
 # MCP Debug Tools
 
-## 🔔 중요 공지사항
+> **AI 에이전트와 VS Code 디버거를 연결하는 브리지** — AI 어시스턴트가 브레이크포인트를 설정하고, 코드를 단계별로 실행하며, 런타임 변수를 실시간으로 검사할 수 있습니다.
 
-### 1. 타임아웃 오류 수정 (v0.2.0+)
-디버그 세션 시작 시 발생하던 타임아웃 문제가 수정되었습니다. 개선된 하트비트와 재시도 메커니즘으로 VSCode 인스턴스 연결이 더욱 안정적으로 작동합니다.
+[![VS Code Marketplace](https://img.shields.io/badge/VS%20Code-Marketplace-blue)](https://marketplace.visualstudio.com/items?itemName=uhd.mcp-debug-tools)
+[![npm](https://img.shields.io/npm/v/@uhd_kr/mcp-debug-tools)](https://www.npmjs.com/package/@uhd_kr/mcp-debug-tools)
 
-### 2. `@latest` 태그 사용 안내
-MCP 설정 시 항상 `@latest` 태그를 포함하여 최신 버전을 사용하도록 설정하세요:
-```json
-"args": [
-  "-y",
-  "@uhd_kr/mcp-debug-tools@latest"
-],
+## 왜 MCP Debug Tools인가?
+
+기존 AI 코딩 어시스턴트는 코드를 **읽고** **쓸** 수 있지만, **디버깅**은 할 수 없습니다. MCP Debug Tools는 AI 에이전트에게 간단한 CLI 명령으로 VS Code 디버거에 직접 접근할 수 있는 기능을 제공하여 이 한계를 제거합니다.
+
+| MCP Debug Tools 없이 | MCP Debug Tools 와 함께 |
+|---------------------|----------------------|
+| AI가 코드를 읽고 버그를 추측 | AI가 브레이크포인트를 설정하고 라이브 런타임 상태를 검사 |
+| "여기에 console.log를 추가해보세요" | AI가 자동으로 코드를 한 줄씩 단계별 실행 |
+| 에러 메시지를 수동으로 복사-붙여넣기 | AI가 콜 스택과 변수 값을 JSON으로 직접 읽기 |
+
+### 💡 Direct CLI 제어 — MCP 연결 없이도 동작
+
+표준 MCP 프록시뿐만 아니라 **단발성 터미널 명령어**(One-off command)로 디버깅 작업을 즉시 실행할 수 있습니다.
+
+- **터미널 AI 친화적**: 터미널 기반의 AI 에이전트가 쉘 명령어로 디버거와 직접 상호작용
+- **연결 오버헤드 제로**: MCP 서버 연결을 구성하거나 유지할 필요 없음
+- **쉬운 파싱**: 결과는 순수 JSON(`stdout`), 로그는 `stderr`로 분리 — AI가 즉시 파싱 가능
+- **스크립트 활용**: bash 스크립트에 VS Code 디버깅 기능을 쉽게 통합
+
+```bash
+# 사용 가능한 모든 도구 검색
+npx @uhd_kr/mcp-debug-tools list
+
+# 도구 직접 실행
+npx @uhd_kr/mcp-debug-tools call add-breakpoint '{"file": "src/app.ts", "line": 15}'
+npx @uhd_kr/mcp-debug-tools call step-over
 ```
 
-AI 도구(Cursor, Windsurf 등)가 VSCode의 디버깅 기능에 접근할 수 있도록 하는 브리지 솔루션입니다. Model Context Protocol (MCP)과 Debug Adapter Protocol (DAP)을 연결하여 AI가 디버깅 작업을 수행할 수 있게 합니다.
+## 🚀 v1.0.0 새로운 기능
 
-## 📺 데모 비디오: AI 기반 디버깅 시연
+### 🤖 AI 에이전트 스킬 자동 주입
+확장이 활성화되면 워크스페이스에 **스킬 문서를 자동으로 주입**하여, AI 에이전트가 **별도의 수동 설정 없이** 디버깅 도구를 발견하고 사용할 수 있습니다.
 
-MCP Debug Tools가 AI 어시스턴트를 통해 여러 Node.js 프로젝트를 동시에 복잡한 디버깅 작업을 수행하는 모습을 확인하세요. 이 시연은 자연어 명령을 통한 실시간 변수 검사, 멀티스레드 디버깅, 자동화된 브레이크포인트 관리를 보여줍니다.
+| AI 플랫폼 | 자동 감지 경로 | 상태 |
+|----------|-------------|------|
+| **Gemini** (Google) | `.gemini/skills/dap-cli-debugging/SKILL.md` | ✅ 지원 |
+| **Claude Code** (Anthropic) | `.claude/skills/dap-cli-debugging/SKILL.md` | ✅ 지원 |
 
-[![MCP Debug Tools Demo](https://github.com/hwanyong/mcp-debug-tools/blob/main/docs/resources/Area_x24.gif)](https://www.youtube.com/watch?v=0lE4-jZ9hTQ)
+### 🔌 오프라인 CLI 지원
+VS Code 확장의 설치 경로에서 CLI를 직접 실행할 수 있습니다 — **인터넷이나 npx가 필요 없습니다**.
+
+```bash
+# macOS / Linux
+node ~/.vscode/extensions/uhd.mcp-debug-tools-*/out/cli.js call get-active-session
+
+# Windows (PowerShell)
+node "$env:USERPROFILE\.vscode\extensions\uhd.mcp-debug-tools-*\out\cli.js" call get-active-session
+```
+
+### 📖 포괄적인 도구 문서화
+**29개 전체 디버깅 도구**가 자동 주입되는 스킬 파일에 카테고리별로 정리되어, 파라미터와 사용 예시를 포함하여 문서화되었습니다.
 
 ## ⚠️ 베타 테스트
 
@@ -100,6 +135,27 @@ npx @uhd_kr/mcp-debug-tools --port=8891
 # 자동 탐색 비활성화
 npx @uhd_kr/mcp-debug-tools --no-auto
 ```
+
+### 로컬 경로 대체 실행 (npx 사용 불가 시)
+
+인터넷이 없거나 네트워크 제한 등으로 `npx`를 사용할 수 없는 경우, VS Code 확장의 설치 디렉토리에서 CLI를 직접 실행할 수 있습니다.
+
+**macOS / Linux:**
+```bash
+node ~/.vscode/extensions/uhd.mcp-debug-tools-*/out/cli.js <command> [args]
+```
+
+**Windows (PowerShell):**
+```powershell
+node "$env:USERPROFILE\.vscode\extensions\uhd.mcp-debug-tools-*\out\cli.js" <command> [args]
+```
+
+**Windows (CMD):**
+```cmd
+node "%USERPROFILE%\.vscode\extensions\uhd.mcp-debug-tools-*\out\cli.js" <command> [args]
+```
+
+> **팁**: `npm install -g @uhd_kr/mcp-debug-tools`로 전역 설치한 경우, `npx` 없이 `mcp-debug-tools <command>`로 바로 실행할 수 있습니다.
 
 ## 🛠️ 지원 기능
 

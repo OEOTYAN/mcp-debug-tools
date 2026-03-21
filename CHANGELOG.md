@@ -6,6 +6,42 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Released]
 
+## [1.0.0] - 2026-03-21
+
+### 🤖 AI Agent Skill Auto-Injection
+- Extension now automatically injects skill documents into the workspace on activation
+- **Gemini** support: `.gemini/skills/dap-cli-debugging/SKILL.md`
+- **Claude Code** support: `.claude/skills/dap-cli-debugging/SKILL.md`
+- AI agents can discover and use all 29 debugging tools without manual configuration
+- Includes YAML frontmatter for Claude Code compatibility
+
+### 📖 Comprehensive Skill Documentation
+- All **29 tools** fully documented in the auto-injected skill file
+- Organized into 4 categories: Session/Config, Breakpoints, Execution Control, State Inspection
+- Complete parameter reference with types and descriptions
+- CLI usage examples and standard debugging workflow
+
+### 🔌 Offline CLI Support
+- Added local path fallback for running CLI without `npx` or internet
+- Documented paths for **macOS**, **Linux**, **Windows (PowerShell)**, and **Windows (CMD)**
+- Global npm install tip for direct `mcp-debug-tools` command access
+
+### 🏗️ Resource Architecture Refactor
+- Moved static resources from `src/resources/` to top-level `resources/` directory
+- Follows VS Code extension standard convention for static assets
+- Eliminates VSIX packaging issue where `.vscodeignore` excluded `src/**`
+- Resources now correctly included in both VSIX and npm packages
+
+### 📝 README Overhaul
+- New value proposition section: "Why MCP Debug Tools?"
+- Comparison table showing AI debugging before vs after
+- Direct CLI control feature highlights
+- Updated architecture and getting started guides
+
+### Changed
+- Renamed skill from `mcp-cli-skill` to `dap-cli-debugging` for clarity
+- Removed legacy `.mcp-debug-tools/mcp-cli-skill.md` injection (replaced by `.gemini/` and `.claude/` paths)
+
 ## [0.2.1] - 2025-09-16
 
 ### ⚠️ Important Configuration Change
