@@ -1,15 +1,15 @@
 /**
  * MCP Debug Tools - Basic Debugging Example
- * 이 예제는 함수, 지역 변수, 반복문, 조건문을 통한 기본적인 디버깅을 학습하기 위한 샘플입니다.
+ * This sample demonstrates basic debugging with functions, local variables, loops, and conditionals.
  */
 
-// 전역 변수
+// Global variables
 let globalCounter = 0;
 const MAX_ITERATIONS = 10;
 
 /**
- * 데이터 처리 클래스
- * 다양한 데이터 타입과 메서드를 포함합니다
+ * Data processing class
+ * Includes several data types and methods.
  */
 class DataProcessor {
     constructor(name) {
@@ -18,7 +18,7 @@ class DataProcessor {
         this.processCount = 0;
     }
 
-    // 데이터 추가 메서드
+    // Add data method
     addData(item) {
         if (typeof item === 'object') {
             this.data.push({ ...item, timestamp: Date.now() });
@@ -28,10 +28,10 @@ class DataProcessor {
         this.processCount++;
     }
 
-    // 데이터 필터링 메서드
+    // Filter data method
     filterData(condition) {
         return this.data.filter(item => {
-            // 조건부 브레이크포인트 설정 예제 포인트
+            // Example point for conditional breakpoints
             if (item.value && condition(item.value)) {
                 return true;
             }
@@ -39,7 +39,7 @@ class DataProcessor {
         });
     }
 
-    // 데이터 요약 통계
+    // Data summary statistics
     getSummary() {
         const summary = {
             totalItems: this.data.length,
@@ -47,7 +47,7 @@ class DataProcessor {
             processorName: this.name
         };
         
-        // 숫자 데이터만 추출하여 통계 계산
+        // Extract numeric data and calculate statistics
         const numericValues = this.data
             .map(item => item.value)
             .filter(val => typeof val === 'number');
@@ -63,16 +63,16 @@ class DataProcessor {
 }
 
 /**
- * 피보나치 수열 계산 (재귀)
- * 콜스택 추적을 위한 예제 함수
+ * Fibonacci sequence calculation (recursive)
+ * Example function for call stack tracing.
  */
 function fibonacci(n) {
-    // 기본 케이스
+    // Base case
     if (n <= 1) {
         return n;
     }
     
-    // 재귀 호출 - 콜스택 깊이 관찰용
+    // Recursive call for observing call stack depth
     const result = fibonacci(n - 1) + fibonacci(n - 2);
     globalCounter++;
     
@@ -80,23 +80,23 @@ function fibonacci(n) {
 }
 
 /**
- * 배열 정렬 알고리즘 (버블 정렬)
- * 반복문과 조건문 디버깅 예제
+ * Array sorting algorithm (bubble sort)
+ * Loop and conditional debugging example.
  */
 function bubbleSort(arr) {
-    const array = [...arr]; // 배열 복사
+    const array = [...arr]; // Copy array
     const n = array.length;
     let swapped;
     
-    // 외부 루프
+    // Outer loop
     for (let i = 0; i < n - 1; i++) {
         swapped = false;
         
-        // 내부 루프
+        // Inner loop
         for (let j = 0; j < n - i - 1; j++) {
-            // 비교 및 스왑
+            // Compare and swap
             if (array[j] > array[j + 1]) {
-                // 스왑 수행
+                // Perform swap
                 let temp = array[j];
                 array[j] = array[j + 1];
                 array[j + 1] = temp;
@@ -104,7 +104,7 @@ function bubbleSort(arr) {
             }
         }
         
-        // 최적화: 스왑이 없으면 정렬 완료
+        // Optimization: no swaps means sorting is complete
         if (!swapped) {
             break;
         }
@@ -114,11 +114,11 @@ function bubbleSort(arr) {
 }
 
 /**
- * 비동기 데이터 처리 함수
- * Promise와 async/await 디버깅 예제
+ * Async data processing function
+ * Promise and async/await debugging example.
  */
 async function fetchDataAsync(id) {
-    // 네트워크 요청 시뮬레이션
+    // Simulate a network request
     return new Promise((resolve, reject) => {
         const delay = Math.random() * 1000;
         
@@ -137,8 +137,8 @@ async function fetchDataAsync(id) {
 }
 
 /**
- * 복잡한 객체 구조 처리
- * 중첩된 객체와 배열 디버깅 예제
+ * Complex object structure processing
+ * Nested object and array debugging example.
  */
 function processComplexData(input) {
     const result = {
@@ -151,18 +151,18 @@ function processComplexData(input) {
         }
     };
     
-    // 입력 데이터 검증
+    // Validate input data
     if (!Array.isArray(input)) {
         result.errors.push('Input must be an array');
         return result;
     }
     
-    // 각 항목 처리
+    // Process each item
     input.forEach((item, index) => {
         result.stats.total++;
         
         try {
-            // 조건부 처리
+            // Conditional processing
             if (item.type === 'number') {
                 const processed = item.value * 2;
                 result.processed.push({
@@ -208,24 +208,24 @@ function processComplexData(input) {
 }
 
 /**
- * 에러 처리 예제 함수
- * try-catch와 예외 처리 디버깅
+ * Error handling example function
+ * try-catch and exception debugging.
  */
 function divideNumbers(a, b) {
     try {
-        // 입력 검증
+        // Validate inputs
         if (typeof a !== 'number' || typeof b !== 'number') {
             throw new TypeError('Both arguments must be numbers');
         }
         
-        // 0으로 나누기 체크
+        // Check division by zero
         if (b === 0) {
             throw new Error('Division by zero is not allowed');
         }
         
         const result = a / b;
         
-        // 결과 검증
+        // Validate result
         if (!isFinite(result)) {
             throw new Error('Result is not finite');
         }
@@ -237,7 +237,7 @@ function divideNumbers(a, b) {
         };
         
     } catch (error) {
-        // 에러 로깅 및 반환
+        // Log and return errors
         console.error('Division error:', error.message);
         return {
             success: false,
@@ -248,17 +248,17 @@ function divideNumbers(a, b) {
 }
 
 /**
- * 메인 실행 함수
- * 모든 예제 함수들을 실행하고 결과를 출력합니다
+ * Main execution function
+ * Runs all example functions and prints results.
  */
 async function main() {
     console.log('=== MCP Debug Tools - Basic Debugging Example ===\n');
     
-    // 1. DataProcessor 클래스 사용
-    console.log('1. DataProcessor 클래스 테스트');
+    // 1. Use the DataProcessor class
+    console.log('1. DataProcessor class test');
     const processor = new DataProcessor('MainProcessor');
     
-    // 다양한 데이터 타입 추가
+    // Add several data types
     for (let i = 1; i <= 5; i++) {
         processor.addData(i * 10);
         processor.addData({ id: i, value: i * 100 });
@@ -269,8 +269,8 @@ async function main() {
     console.log('Summary:', processor.getSummary());
     console.log('');
     
-    // 2. 피보나치 수열 계산
-    console.log('2. 피보나치 수열 계산');
+    // 2. Calculate Fibonacci sequence
+    console.log('2. Fibonacci sequence calculation');
     const fibNumbers = [];
     for (let i = 1; i <= 8; i++) {
         const fib = fibonacci(i);
@@ -280,16 +280,16 @@ async function main() {
     console.log('Global counter:', globalCounter);
     console.log('');
     
-    // 3. 배열 정렬
-    console.log('3. 버블 정렬 알고리즘');
+    // 3. Sort array
+    console.log('3. Bubble sort algorithm');
     const unsorted = [64, 34, 25, 12, 22, 11, 90, 88, 45, 33];
     console.log('Before sorting:', unsorted);
     const sorted = bubbleSort(unsorted);
     console.log('After sorting:', sorted);
     console.log('');
     
-    // 4. 비동기 처리
-    console.log('4. 비동기 데이터 처리');
+    // 4. Async processing
+    console.log('4. Async data processing');
     try {
         const promises = [
             fetchDataAsync(1),
@@ -302,7 +302,7 @@ async function main() {
             console.log(`Fetched:`, result);
         });
         
-        // 에러 케이스 테스트
+        // Test error case
         try {
             await fetchDataAsync(-1);
         } catch (error) {
@@ -313,14 +313,14 @@ async function main() {
     }
     console.log('');
     
-    // 5. 복잡한 데이터 처리
-    console.log('5. 복잡한 객체 구조 처리');
+    // 5. Process complex data
+    console.log('5. Complex object structure processing');
     const complexInput = [
         { type: 'number', value: 42 },
         { type: 'string', value: 'hello' },
         { type: 'array', value: [1, 2, 3, 4, 5] },
         { type: 'number', value: 100 },
-        { type: 'unknown', value: {} },  // 에러 발생 케이스
+        { type: 'unknown', value: {} },  // Error case
         { type: 'string', value: 'world' }
     ];
     
@@ -328,8 +328,8 @@ async function main() {
     console.log('Process result:', JSON.stringify(processResult, null, 2));
     console.log('');
     
-    // 6. 에러 처리 예제
-    console.log('6. 에러 처리 예제');
+    // 6. Error handling example
+    console.log('6. Error handling example');
     const divisionTests = [
         { a: 10, b: 2 },
         { a: 100, b: 0 },    // Division by zero
@@ -343,11 +343,11 @@ async function main() {
         console.log(`Division test:`, result);
     });
     
-    console.log('\n=== 모든 테스트 완료 ===');
-    console.log('브레이크포인트를 설정하고 디버깅을 시작하세요!');
+    console.log('\n=== All tests complete ===');
+    console.log('Set breakpoints and start debugging.');
 }
 
-// 프로그램 실행
+// Run program
 main().catch(error => {
     console.error('Fatal error:', error);
     process.exit(1);

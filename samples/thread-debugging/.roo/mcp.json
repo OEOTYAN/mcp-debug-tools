@@ -4,7 +4,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@uhd_kr/mcp-debug-tools"
+        "mcp-debug-tools"
       ],
       "env": {},
       "disabled": false,

@@ -3,6 +3,7 @@ import * as path from 'path'
 import * as vscode from 'vscode'
 import { promisify } from 'util'
 import { WorkspaceConfig, getWorkspaceConfigPath } from './discovery'
+import { t } from './i18n'
 
 const writeFile = promisify(fs.writeFile)
 const readFile = promisify(fs.readFile)
@@ -10,8 +11,8 @@ const mkdir = promisify(fs.mkdir)
 const unlink = promisify(fs.unlink)
 
 /**
- * Workspace 설정 파일 관리자
- * .mcp-debug-tools/config.json 파일을 관리합니다
+ * Manages workspace config files.
+ * Handles .mcp-debug-tools/config.json when workspace config writing is enabled.
  */
 export class ConfigManager {
     private configDir: string
@@ -30,7 +31,7 @@ export class ConfigManager {
     }
     
     /**
-     * 설정 파일 생성 및 초기화
+     * Create and initialize the config file.
      */
     async initialize(port: number): Promise<void> {
         try {
@@ -46,30 +47,30 @@ export class ConfigManager {
             if (process.env.MCP_DEBUG_TOOLS_WRITE_WORKSPACE_CONFIG === '1') {
                 await this.ensureConfigDir()
                 await this.saveConfig(config)
-                console.log(`Config file created at: ${this.configPath}`)
+                console.log(t('config.created', { path: this.configPath }))
             } else {
-                console.log('Workspace config file skipped; using temp registry discovery')
+                console.log(t('config.workspaceConfigSkipped'))
             }
             
             if (process.env.MCP_DEBUG_TOOLS_INJECT_WORKSPACE_SKILL === '1') {
                 await this.injectSkillDocument()
             }
         } catch (error) {
-            console.error('Failed to initialize config:', error)
+            console.error(t('config.initializeFailed', { error }))
             throw error
         }
     }
     
     /**
-     * AI CLI 가이드(SKILL) 문서를 워크스페이스에 복사하여 제공합니다.
-     * - .gemini/skills/dap-cli-debugging/SKILL.md (Gemini 에이전트 자동 인식용)
-     * - .claude/skills/dap-cli-debugging/SKILL.md (Claude Code 에이전트 자동 인식용)
+     * Copy the AI CLI guide (SKILL) document into the workspace.
+     * - .gemini/skills/dap-cli-debugging/SKILL.md (auto-detected by Gemini agents)
+     * - .claude/skills/dap-cli-debugging/SKILL.md (auto-detected by Claude Code agents)
      */
     private async injectSkillDocument(): Promise<void> {
         const skillSourcePath = path.join(this.extensionPath, 'resources', 'skills', 'dap-cli-debugging.md')
 
         if (!fs.existsSync(skillSourcePath)) {
-            console.warn(`SKILL document source not found at: ${skillSourcePath}`)
+            console.warn(t('config.skillSourceMissing', { path: skillSourcePath }))
             return
         }
 
@@ -85,21 +86,21 @@ export class ConfigManager {
             try {
                 await mkdir(path.dirname(destPath), { recursive: true })
                 await writeFile(destPath, content, 'utf8')
-                console.log(`SKILL document injected at: ${destPath}`)
+                console.log(t('config.skillInjected', { path: destPath }))
             } catch (error) {
-                console.error(`Failed to inject SKILL document to ${destPath}:`, error)
+                console.error(t('config.skillInjectFailed', { path: destPath, error }))
             }
         }
     }
     
     /**
-     * 설정 파일 업데이트
+     * Update the config file.
      */
     async updateConfig(updates: Partial<WorkspaceConfig>): Promise<void> {
         try {
             const currentConfig = await this.loadConfig()
             if (!currentConfig) {
-                console.error('No config to update')
+                console.error(t('config.noConfigToUpdate'))
                 return
             }
             const updatedConfig: WorkspaceConfig = {
@@ -112,13 +113,13 @@ export class ConfigManager {
             }
             await this.saveConfig(updatedConfig)
         } catch (error) {
-            console.error('Failed to update config:', error)
+            console.error(t('config.updateFailed', { error }))
             throw error
         }
     }
     
     /**
-     * 설정 파일 로드
+     * Load the config file.
      */
     async loadConfig(): Promise<WorkspaceConfig | null> {
         if (this.config) {
@@ -137,7 +138,7 @@ export class ConfigManager {
     }
     
     /**
-     * 설정 파일 저장
+     * Save the config file.
      */
     private async saveConfig(config: WorkspaceConfig): Promise<void> {
         const data = JSON.stringify(config, null, 2)
@@ -145,7 +146,7 @@ export class ConfigManager {
     }
     
     /**
-     * 디렉토리 확인 및 생성
+     * Ensure the config directory exists.
      */
     private async ensureConfigDir(): Promise<void> {
         try {
@@ -158,7 +159,7 @@ export class ConfigManager {
     }
     
     /**
-     * 설정 파일 삭제
+     * Delete the config file.
      */
     async cleanup(): Promise<void> {
         this.config = null
@@ -167,18 +168,18 @@ export class ConfigManager {
         }
 
         try {
-            // 파일 삭제
+            // Delete the file.
             await unlink(this.configPath)
-            console.log(`Config file removed: ${this.configPath}`)
+            console.log(t('config.removed', { path: this.configPath }))
         } catch (error) {
             if ((error as any).code !== 'ENOENT') {
-                console.error('Failed to cleanup config:', error)
+                console.error(t('config.cleanupFailed', { error }))
             }
         }
     }
     
     /**
-     * 고유 인스턴스 ID 생성
+     * Generate a unique instance ID.
      */
     private generateInstanceId(): string {
         return `vscode-${process.pid}-${Date.now()}`

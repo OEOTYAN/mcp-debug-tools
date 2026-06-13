@@ -8,5 +8,5 @@ node_modules
 
 __hidden*
 
-# MCP Debug Tools 로컬 설정
+# MCP Debug Tools local settings
 .mcp-debug-tools/

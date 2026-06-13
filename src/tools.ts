@@ -6,6 +6,7 @@ import { getWorkspaceRoot, getRelativePath } from './utils/path'
 import { inputSchemas } from './tools-parameters'
 import { parseJsonWithComments } from './utils/json'
 import { state } from './state'
+import { t } from './i18n'
 import {
     RegistryEntry,
     getRegistryPath,
@@ -25,6 +26,20 @@ function asJsonContent(value: unknown) {
             text: JSON.stringify(value, null, 2)
         }]
     }
+}
+
+function asTextContent(text: string, isError = false) {
+    return {
+        content: [{
+            type: 'text' as const,
+            text
+        }],
+        ...(isError ? { isError: true } : {})
+    }
+}
+
+function asErrorContent(error: any) {
+    return asTextContent(t('tools.error', { error: error?.message || error }), true)
 }
 
 function getActiveThreadId(): number | undefined {
@@ -249,7 +264,7 @@ async function revealFrameSource(frame: any): Promise<any> {
     }
 }
 
-// 브레이크포인트 추가
+// Add a breakpoint
 export const addBreakpointTool = {
     name: 'add-breakpoint',
     config: {
@@ -261,18 +276,18 @@ export const addBreakpointTool = {
         const { file, line, condition, hitCondition, logMessage } = args
         const tmpLogMessage = null
         
-        console.log(`[DEBUG] addBreakpoint 시작: ${file}:${line}`)
+        console.log(`[DEBUG] addBreakpoint start: ${file}:${line}`)
         const startTime = Date.now()
         
         try {
             const uri = vscode.Uri.file(path.join(getWorkspaceRoot(), file))
             const location = new vscode.Location(uri, new vscode.Position(line - 1, 0))
             
-            console.log(`[DEBUG] 브레이크포인트 생성 중...`)
-            // 브레이크포인트 생성
+            console.log(`[DEBUG] Creating breakpoint...`)
+            // Create breakpoint
             const breakpoint = new vscode.SourceBreakpoint(location)
             
-            // 조건부 설정 (옵셔널)
+            // Optional condition settings
             if (condition) {
                 (breakpoint as any).condition = condition
             }
@@ -285,9 +300,9 @@ export const addBreakpointTool = {
             //     (breakpoint as any).logMessage = logMessage
             // }
             
-            console.log(`[DEBUG] VSCode API 호출 전: vscode.debug.addBreakpoints`)
+            console.log(`[DEBUG] Before VS Code API call: vscode.debug.addBreakpoints`)
             
-            // 타임아웃 설정 (10초)
+            // Timeout guard (10 seconds)
             const addBreakpointPromise = vscode.debug.addBreakpoints([breakpoint])
             const timeoutPromise = new Promise((_, reject) => {
                 setTimeout(() => {
@@ -298,7 +313,7 @@ export const addBreakpointTool = {
             await Promise.race([addBreakpointPromise, timeoutPromise])
             
             const duration = Date.now() - startTime
-            console.log(`[DEBUG] 브레이크포인트 추가 완료 (${duration}ms)`)
+            console.log(`[DEBUG] Breakpoint added (${duration}ms)`)
             
             const result = {
                 file: file,
@@ -307,8 +322,8 @@ export const addBreakpointTool = {
                 hitCondition: hitCondition || null,
                 logMessage: tmpLogMessage || null,
                 message: condition || hitCondition || tmpLogMessage ? 
-                    'Conditional breakpoint added successfully' : 
-                    'Breakpoint added successfully'
+                    t('tools.conditionalBreakpointAdded') :
+                    t('tools.breakpointAdded')
             }
             
             return { 
@@ -318,15 +333,12 @@ export const addBreakpointTool = {
                 }] 
             }
         } catch (error: any) {
-            return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
-                isError: true 
-            }
+            return asErrorContent(error)
         }
     }
 }
 
-// 다수 브레이크포인트 추가
+// Add multiple breakpoints
 export const addBreakpointsTool = {
     name: 'add-breakpoints',
     config: {
@@ -341,7 +353,7 @@ export const addBreakpointsTool = {
             const results: any[] = []
             const BATCH_SIZE = 5
             
-            // 배치 단위로 처리
+            // Process in batches
             for (let i = 0; i < breakpoints.length; i += BATCH_SIZE) {
                 const batch = breakpoints.slice(i, i + BATCH_SIZE)
                 const batchBreakpoints: vscode.SourceBreakpoint[] = []
@@ -351,10 +363,10 @@ export const addBreakpointsTool = {
                     const uri = vscode.Uri.file(path.join(getWorkspaceRoot(), file))
                     const location = new vscode.Location(uri, new vscode.Position(line - 1, 0))
                     
-                    // 브레이크포인트 생성
+                    // Create breakpoint
                     const breakpoint = new vscode.SourceBreakpoint(location)
                     
-                    // 조건부 설정 (옵셔널)
+                    // Optional condition settings
                     if (condition) {
                         (breakpoint as any).condition = condition
                     }
@@ -371,15 +383,15 @@ export const addBreakpointsTool = {
                         hitCondition: hitCondition || null,
                         logMessage: null,
                         message: condition || hitCondition ? 
-                            'Conditional breakpoint added successfully' : 
-                            'Breakpoint added successfully'
+                            t('tools.conditionalBreakpointAdded') :
+                            t('tools.breakpointAdded')
                     })
                 }
                 
-                // 각 배치를 개별적으로 처리
+                // Process each batch separately
                 await vscode.debug.addBreakpoints(batchBreakpoints)
                 
-                // 배치 사이에 짧은 지연 추가
+                // Add a short delay between batches
                 if (i + BATCH_SIZE < breakpoints.length) {
                     await new Promise(resolve => setTimeout(resolve, 100))
                 }
@@ -395,15 +407,12 @@ export const addBreakpointsTool = {
                 }]
             }
         } catch (error: any) {
-            return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
-                isError: true 
-            }
+            return asErrorContent(error)
         }
     }
 }
 
-// 브레이크포인트 제거
+// Remove a breakpoint
 export const removeBreakpointTool = {
     name: 'remove-breakpoint',
     config: {
@@ -423,19 +432,16 @@ export const removeBreakpointTool = {
             
             if (breakpoints.length > 0) {
                 vscode.debug.removeBreakpoints(breakpoints)
-                return { content: [{ type: 'text' as const, text: `Breakpoint removed from ${file}:${line}` }] }
+                return asTextContent(t('tools.breakpointRemoved', { file, line }))
             }
-            return { content: [{ type: 'text' as const, text: `No breakpoint found at ${file}:${line}` }] }
+            return asTextContent(t('tools.breakpointNotFound', { file, line }))
         } catch (error: any) {
-            return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
-                isError: true 
-            }
+            return asErrorContent(error)
         }
     }
 }
 
-// 모든 브레이크포인트 제거
+// Clear all breakpoints
 export const clearBreakpointsTool = {
     name: 'clear-breakpoints',
     config: {
@@ -445,7 +451,7 @@ export const clearBreakpointsTool = {
     },
     handler: async (args: any) => {
         const startTime = Date.now()
-        console.error(`🔧 [clear-breakpoints] 핸들러 시작`)
+        console.error(`[clear-breakpoints] Handler start`)
         
         const { files } = args as { files?: string[] }
         
@@ -453,7 +459,7 @@ export const clearBreakpointsTool = {
             let breakpoints: vscode.Breakpoint[]
             
             if (files && files.length > 0) {
-                // 특정 파일들의 브레이크포인트만 제거
+                // Remove only breakpoints in the specified files
                 const uris = files.map(file => vscode.Uri.file(path.join(getWorkspaceRoot(), file)))
                 breakpoints = vscode.debug.breakpoints.filter(bp =>
                     bp instanceof vscode.SourceBreakpoint &&
@@ -461,44 +467,41 @@ export const clearBreakpointsTool = {
                 )
                 
                 if (breakpoints.length > 0) {
-                    console.error(`⏳ [clear-breakpoints] VSCode API 호출 전`)
+                    console.error(`[clear-breakpoints] Before VS Code API call`)
                     vscode.debug.removeBreakpoints(breakpoints)
                     const elapsed = Date.now() - startTime
-                    console.error(`✅ [clear-breakpoints] VSCode API 호출 완료 (${elapsed}ms)`)
+                    console.error(`[clear-breakpoints] VS Code API call complete (${elapsed}ms)`)
                     
-                    const result = { content: [{ type: 'text' as const, text: `Cleared ${breakpoints.length} breakpoint(s) from ${files.length} file(s): ${files.join(', ')}` }] }
-                    console.error(`📤 [clear-breakpoints] 결과 반환`)
+                    const result = asTextContent(t('tools.breakpointsClearedFromFiles', { count: breakpoints.length, files: files.length, fileList: files.join(', ') }))
+                    console.error(`[clear-breakpoints] Returning result`)
                     return result
                 }
-                return { content: [{ type: 'text' as const, text: `No breakpoints found in specified files: ${files.join(', ')}` }] }
+                return asTextContent(t('tools.noBreakpointsInFiles', { files: files.join(', ') }))
             } else {
-                // 모든 브레이크포인트 제거
+                // Clear all breakpoints
                 breakpoints = vscode.debug.breakpoints.filter(bp => bp instanceof vscode.SourceBreakpoint)
                 
                 if (breakpoints.length > 0) {
-                    console.error(`⏳ [clear-breakpoints] VSCode API 호출 전`)
+                    console.error(`[clear-breakpoints] Before VS Code API call`)
                     vscode.debug.removeBreakpoints(breakpoints)
                     const elapsed = Date.now() - startTime
-                    console.error(`✅ [clear-breakpoints] VSCode API 호출 완료 (${elapsed}ms)`)
+                    console.error(`[clear-breakpoints] VS Code API call complete (${elapsed}ms)`)
                     
-                    const result = { content: [{ type: 'text' as const, text: `Cleared ${breakpoints.length} breakpoint(s) from all files` }] }
-                    console.error(`📤 [clear-breakpoints] 결과 반환`)
+                    const result = asTextContent(t('tools.breakpointsClearedAll', { count: breakpoints.length }))
+                    console.error(`[clear-breakpoints] Returning result`)
                     return result
                 }
-                return { content: [{ type: 'text' as const, text: 'No breakpoints to clear' }] }
+                return asTextContent(t('tools.noBreakpointsToClear'))
             }
         } catch (error: any) {
             const elapsed = Date.now() - startTime
-            console.error(`❌ [clear-breakpoints] 오류 (${elapsed}ms):`, error)
-            return {
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
-                isError: true
-            }
+            console.error(`[clear-breakpoints] Error (${elapsed}ms):`, error)
+            return asErrorContent(error)
         }
     }
 }
 
-// 모든 브레이크포인트 목록
+// List all breakpoints
 export const listBreakpointsTool = {
     name: 'list-breakpoints',
     config: {
@@ -522,14 +525,14 @@ export const listBreakpointsTool = {
             return { content: [{ type: 'text' as const, text: JSON.stringify(breakpoints, null, 2) }] }
         } catch (error: any) {
             return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true 
             }
         }
     }
 }
 
-// 디버그 시작
+// Start debugging
 export const startDebugTool = {
     name: 'start-debug',
     config: {
@@ -542,21 +545,18 @@ export const startDebugTool = {
         try {
             const folder = vscode.workspace.workspaceFolders?.[0]
             if (!folder) {
-                return { content: [{ type: 'text' as const, text: 'No workspace folder open' }], isError: true }
+                return asTextContent(t('tools.noWorkspaceFolder'), true)
             }
             
             const success = await vscode.debug.startDebugging(folder, config)
-            return { content: [{ type: 'text' as const, text: success ? `Debug session '${config}' started` : 'Failed to start debug session' }] }
+            return asTextContent(success ? t('tools.debugStarted', { config }) : t('tools.debugStartFailed'))
         } catch (error: any) {
-            return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
-                isError: true 
-            }
+            return asErrorContent(error)
         }
     }
 }
 
-// 디버그 중지
+// Stop debugging
 export const stopDebugTool = {
     name: 'stop-debug',
     config: {
@@ -568,21 +568,18 @@ export const stopDebugTool = {
         try {
             const session = vscode.debug.activeDebugSession
             if (!session) {
-                return { content: [{ type: 'text' as const, text: 'No active debug session' }] }
+                return asTextContent(t('tools.noActiveDebugSession'))
             }
             
             await vscode.debug.stopDebugging(session)
-            return { content: [{ type: 'text' as const, text: 'Debug session stopped' }] }
+            return asTextContent(t('tools.debugStopped'))
         } catch (error: any) {
-            return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
-                isError: true 
-            }
+            return asErrorContent(error)
         }
     }
 }
 
-// 실행 계속
+// Continue execution
 export const continueTool = {
     name: 'continue',
     config: {
@@ -593,21 +590,18 @@ export const continueTool = {
     handler: async () => {
         try {
             if (!vscode.debug.activeDebugSession) {
-                return { content: [{ type: 'text' as const, text: 'No active debug session' }] }
+                return asTextContent(t('tools.noActiveDebugSession'))
             }
             
             await vscode.commands.executeCommand('workbench.action.debug.continue')
-            return { content: [{ type: 'text' as const, text: 'Execution continued' }] }
+            return asTextContent(t('tools.executionContinued'))
         } catch (error: any) {
-            return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
-                isError: true 
-            }
+            return asErrorContent(error)
         }
     }
 }
 
-// 한 줄 실행 (함수 건너뛰기)
+// Step over
 export const stepOverTool = {
     name: 'step-over',
     config: {
@@ -618,21 +612,18 @@ export const stepOverTool = {
     handler: async () => {
         try {
             if (!vscode.debug.activeDebugSession) {
-                return { content: [{ type: 'text' as const, text: 'No active debug session' }] }
+                return asTextContent(t('tools.noActiveDebugSession'))
             }
             
             await vscode.commands.executeCommand('workbench.action.debug.stepOver')
-            return { content: [{ type: 'text' as const, text: 'Stepped over' }] }
+            return asTextContent(t('tools.steppedOver'))
         } catch (error: any) {
-            return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
-                isError: true 
-            }
+            return asErrorContent(error)
         }
     }
 }
 
-// 함수 안으로 들어가기
+// Step into
 export const stepIntoTool = {
     name: 'step-into',
     config: {
@@ -643,21 +634,18 @@ export const stepIntoTool = {
     handler: async () => {
         try {
             if (!vscode.debug.activeDebugSession) {
-                return { content: [{ type: 'text' as const, text: 'No active debug session' }] }
+                return asTextContent(t('tools.noActiveDebugSession'))
             }
             
             await vscode.commands.executeCommand('workbench.action.debug.stepInto')
-            return { content: [{ type: 'text' as const, text: 'Stepped into' }] }
+            return asTextContent(t('tools.steppedInto'))
         } catch (error: any) {
-            return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
-                isError: true 
-            }
+            return asErrorContent(error)
         }
     }
 }
 
-// 함수 밖으로 나가기
+// Step out
 export const stepOutTool = {
     name: 'step-out',
     config: {
@@ -668,21 +656,18 @@ export const stepOutTool = {
     handler: async () => {
         try {
             if (!vscode.debug.activeDebugSession) {
-                return { content: [{ type: 'text' as const, text: 'No active debug session' }] }
+                return asTextContent(t('tools.noActiveDebugSession'))
             }
             
             await vscode.commands.executeCommand('workbench.action.debug.stepOut')
-            return { content: [{ type: 'text' as const, text: 'Stepped out' }] }
+            return asTextContent(t('tools.steppedOut'))
         } catch (error: any) {
-            return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
-                isError: true 
-            }
+            return asErrorContent(error)
         }
     }
 }
 
-// 일시 중지
+// Pause execution
 export const pauseTool = {
     name: 'pause',
     config: {
@@ -693,21 +678,21 @@ export const pauseTool = {
     handler: async () => {
         try {
             if (!vscode.debug.activeDebugSession) {
-                return { content: [{ type: 'text' as const, text: 'No active debug session' }] }
+                return asTextContent(t('tools.noActiveDebugSession'))
             }
             
             await vscode.commands.executeCommand('workbench.action.debug.pause')
-            return { content: [{ type: 'text' as const, text: 'Execution paused' }] }
+            return asTextContent(t('tools.executionPaused'))
         } catch (error: any) {
             return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true 
             }
         }
     }
 }
 
-// 디버그 상태 가져오기
+// Get debug state
 export const getDebugStateTool = {
     name: 'get-debug-state',
     config: {
@@ -740,14 +725,14 @@ export const getDebugStateTool = {
             return { content: [{ type: 'text' as const, text: JSON.stringify(state, null, 2) }] }
         } catch (error: any) {
             return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true 
             }
         }
     }
 }
 
-// 표현식 평가
+// Evaluate expression
 export const evaluateExpressionTool = {
     name: 'evaluate-expression',
     config: {
@@ -759,11 +744,11 @@ export const evaluateExpressionTool = {
         const { expression, frameId, context = 'repl' } = args
         
         try {
-            // 디버그 세션 확인
+            // Check debug session
             const session = vscode.debug.activeDebugSession
             if (!session) {
                 return { 
-                    content: [{ type: 'text' as const, text: 'No active debug session' }],
+                    content: [{ type: 'text' as const, text: t('tools.noActiveDebugSession') }],
                     isError: true 
                 }
             }
@@ -771,7 +756,7 @@ export const evaluateExpressionTool = {
             console.log('Debug session:', session.name, session.type)
             console.log('Expression to evaluate:', expression)
             
-            // DebugSession의 customRequest를 사용하여 evaluate 요청
+            // Use DebugSession.customRequest for evaluate.
             try {
                 const requestBody = {
                     expression: expression,
@@ -811,14 +796,14 @@ export const evaluateExpressionTool = {
             }
         } catch (error: any) {
             return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true 
             }
         }
     }
 }
 
-// 특정 변수 검사
+// Inspect a specific variable
 export const inspectVariableTool = {
     name: 'inspect-variable',
     config: {
@@ -837,16 +822,16 @@ export const inspectVariableTool = {
         } = args
         
         try {
-            // 디버그 세션 확인
+            // Check debug session
             const session = vscode.debug.activeDebugSession
             if (!session) {
                 return { 
-                    content: [{ type: 'text' as const, text: 'No active debug session' }],
+                    content: [{ type: 'text' as const, text: t('tools.noActiveDebugSession') }],
                     isError: true 
                 }
             }
             
-            // 먼저 scopes 요청으로 변수 스코프 확인
+            // First request scopes to inspect variable scopes.
             try {
                 const resolvedFrame = await resolveFrameId(session, { frameId })
                 if (resolvedFrame.frameId === undefined) {
@@ -858,7 +843,7 @@ export const inspectVariableTool = {
                 })
                 
                 if (scopesResponse && scopesResponse.scopes) {
-                    // 각 스코프에서 variables 요청
+                    // Request variables for each scope.
                     for (const scope of scopesResponse.scopes) {
                         if (!shouldIncludeScope(scope, scopeName, includeRegisters)) continue
 
@@ -868,7 +853,7 @@ export const inspectVariableTool = {
                         })
                         
                         if (variablesResponse && variablesResponse.variables) {
-                            // 변수명으로 검색
+                            // Search by variable name
                             const variable = variablesResponse.variables.find((v: any) => v.name === variableName)
                             if (variable) {
                                 const result = {
@@ -890,18 +875,18 @@ export const inspectVariableTool = {
                 console.log('Variable inspection failed:', error)
             }
             
-            // 변수를 찾지 못한 경우
+            // Variable not found
             return asJsonContent({ message: `Variable "${variableName}" not found in scope`, frameId, scopeName })
         } catch (error: any) {
             return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true 
             }
         }
     }
 }
 
-// 디버그 구성 목록 조회
+// List debug configurations
 export const listDebugConfigsTool = {
     name: 'list-debug-configs',
     config: {
@@ -914,23 +899,23 @@ export const listDebugConfigsTool = {
             const workspaceFolder = vscode.workspace.workspaceFolders?.[0]
             if (!workspaceFolder) {
                 return { 
-                    content: [{ type: 'text' as const, text: 'No workspace folder open' }],
+                    content: [{ type: 'text' as const, text: t('tools.noWorkspaceFolder') }],
                     isError: true 
                 }
             }
             
-            // launch.json 파일 읽기
+            // Read launch.json
             const launchJsonUri = vscode.Uri.joinPath(workspaceFolder.uri, '.vscode', 'launch.json')
             
             try {
                 const launchJsonContent = await vscode.workspace.fs.readFile(launchJsonUri)
                 const contentString = launchJsonContent.toString()
                 
-                // 디버깅을 위한 내용 출력
+                // Print content details for debugging
                 console.log('Launch.json content length:', contentString.length)
                 console.log('Launch.json first 100 chars:', contentString.substring(0, 100))
                 
-                // JSON 파싱 시도 (주석 제거 후)
+                // Parse JSON after removing comments
                 let launchJson
                 try {
                     launchJson = parseJsonWithComments(contentString)
@@ -998,14 +983,14 @@ export const listDebugConfigsTool = {
             }
         } catch (error: any) {
             return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true 
             }
         }
     }
 }
 
-// 디버그 구성 선택
+// Select debug configuration
 export const selectDebugConfigTool = {
     name: 'select-debug-config',
     config: {
@@ -1020,12 +1005,12 @@ export const selectDebugConfigTool = {
             const workspaceFolder = vscode.workspace.workspaceFolders?.[0]
             if (!workspaceFolder) {
                 return { 
-                    content: [{ type: 'text' as const, text: 'No workspace folder open' }],
+                    content: [{ type: 'text' as const, text: t('tools.noWorkspaceFolder') }],
                     isError: true 
                 }
             }
             
-            // launch.json 파일 읽기
+            // Read launch.json
             const launchJsonUri = vscode.Uri.joinPath(workspaceFolder.uri, '.vscode', 'launch.json')
             
             try {
@@ -1090,16 +1075,16 @@ export const selectDebugConfigTool = {
             }
         } catch (error: any) {
             return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true 
             }
         }
     }
 }
 
-// 새로운 도구들 추가
+// Additional tools
 
-// 1. DAP 로그 도구
+// 1. DAP log tool
 export const getDapLogTool = {
     name: 'get-dap-log',
     config: {
@@ -1109,7 +1094,7 @@ export const getDapLogTool = {
     },
     handler: async (args: any) => {
         try {
-            // DAP 메시지 수집이 비활성화됨
+            // DAP message collection is disabled.
             return {
                 content: [{
                     type: 'text' as const,
@@ -1121,14 +1106,14 @@ export const getDapLogTool = {
             }
         } catch (error: any) {
             return {
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true
             }
         }
     }
 }
 
-// 2. 브레이크포인트 목록 도구
+// 2. Breakpoint list tool
 export const getBreakpointsTool = {
     name: 'get-breakpoints',
     config: {
@@ -1160,14 +1145,14 @@ export const getBreakpointsTool = {
             }
         } catch (error: any) {
             return {
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true
             }
         }
     }
 }
 
-// 3. 활성 세션 도구
+// 3. Active session tool
 export const getActiveSessionTool = {
     name: 'get-active-session',
     config: {
@@ -1183,7 +1168,7 @@ export const getActiveSessionTool = {
                 return {
                     content: [{
                         type: 'text' as const,
-                        text: JSON.stringify({ message: 'No active debug session' }, null, 2)
+                        text: JSON.stringify({ message: t('tools.noActiveDebugSession') }, null, 2)
                     }]
                 }
             }
@@ -1204,14 +1189,14 @@ export const getActiveSessionTool = {
             }
         } catch (error: any) {
             return {
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true
             }
         }
     }
 }
 
-// 4. 디버그 콘솔 도구
+// 4. Debug console tool
 export const getDebugConsoleTool = {
     name: 'get-debug-console',
     config: {
@@ -1223,7 +1208,7 @@ export const getDebugConsoleTool = {
         try {
             const { limit, filter } = args
             
-            // DAP 메시지 수집이 비활성화됨
+            // DAP message collection is disabled.
             return {
                 content: [{
                     type: 'text' as const,
@@ -1232,14 +1217,14 @@ export const getDebugConsoleTool = {
             }
         } catch (error: any) {
             return {
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true
             }
         }
     }
 }
 
-// 5. 활성 스택 아이템 도구
+// 5. Active stack item tool
 export const getActiveStackItemTool = {
     name: 'get-active-stack-item',
     config: {
@@ -1267,14 +1252,14 @@ export const getActiveStackItemTool = {
             }
         } catch (error: any) {
             return {
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true
             }
         }
     }
 }
 
-// 6. 콜스택 도구
+// 6. Call stack tool
 export const getCallStackTool = {
     name: 'get-call-stack',
     config: {
@@ -1291,7 +1276,7 @@ export const getCallStackTool = {
                 return {
                     content: [{
                         type: 'text' as const,
-                        text: JSON.stringify({ message: 'No active debug session' }, null, 2)
+                        text: JSON.stringify({ message: t('tools.noActiveDebugSession') }, null, 2)
                     }]
                 }
             }
@@ -1350,19 +1335,19 @@ export const getCallStackTool = {
             return {
                 content: [{
                     type: 'text' as const,
-                    text: JSON.stringify({ message: 'Failed to get call stack' }, null, 2)
+                    text: JSON.stringify({ message: t('resources.callStackFailed') }, null, 2)
                 }]
             }
         } catch (error: any) {
             return {
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true
             }
         }
     }
 }
 
-// 6-1. 콜스택 프레임 선택 및 UI 이동 도구
+// 6-1. Select a call stack frame and sync the UI
 export const selectStackFrameTool = {
     name: 'select-stack-frame',
     config: {
@@ -1381,7 +1366,7 @@ export const selectStackFrameTool = {
             const session = vscode.debug.activeDebugSession
 
             if (!session) {
-                return asJsonContent({ message: 'No active debug session' })
+                return asJsonContent({ message: t('tools.noActiveDebugSession') })
             }
 
             let targetThreadId = threadId || getActiveThreadId()
@@ -1538,14 +1523,14 @@ export const selectStackFrameTool = {
             })
         } catch (error: any) {
             return {
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true
             }
         }
     }
 }
 
-// 7. 변수/스코프 도구
+// 7. Variables and scopes tool
 export const getVariablesScopeTool = {
     name: 'get-variables-scope',
     config: {
@@ -1570,7 +1555,7 @@ export const getVariablesScopeTool = {
                 return {
                     content: [{
                         type: 'text' as const,
-                        text: JSON.stringify({ message: 'No active debug session' }, null, 2)
+                        text: JSON.stringify({ message: t('tools.noActiveDebugSession') }, null, 2)
                     }]
                 }
             }
@@ -1602,19 +1587,19 @@ export const getVariablesScopeTool = {
             return {
                 content: [{
                     type: 'text' as const,
-                    text: JSON.stringify({ message: 'Failed to get variables and scopes' }, null, 2)
+                    text: JSON.stringify({ message: t('resources.variablesFailed') }, null, 2)
                 }]
             }
         } catch (error: any) {
             return {
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true
             }
         }
     }
 }
 
-// 7-1. 콜스택 프레임별 변수 도구
+// 7-1. Variables by call stack frame tool
 export const getStackVariablesTool = {
     name: 'get-stack-variables',
     config: {
@@ -1636,7 +1621,7 @@ export const getStackVariablesTool = {
             const session = vscode.debug.activeDebugSession
 
             if (!session) {
-                return asJsonContent({ message: 'No active debug session' })
+                return asJsonContent({ message: t('tools.noActiveDebugSession') })
             }
 
             let targetThreadId = threadId || getActiveThreadId()
@@ -1690,14 +1675,14 @@ export const getStackVariablesTool = {
             })
         } catch (error: any) {
             return {
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true
             }
         }
     }
 }
 
-// 7-2. 변수 참조 펼치기 도구
+// 7-2. Expand variable reference tool
 export const expandVariableTool = {
     name: 'expand-variable',
     config: {
@@ -1715,7 +1700,7 @@ export const expandVariableTool = {
             const session = vscode.debug.activeDebugSession
 
             if (!session) {
-                return asJsonContent({ message: 'No active debug session' })
+                return asJsonContent({ message: t('tools.noActiveDebugSession') })
             }
 
             const variables = await getExpandedVariables(
@@ -1733,14 +1718,14 @@ export const expandVariableTool = {
             })
         } catch (error: any) {
             return {
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true
             }
         }
     }
 }
 
-// 8. 스레드 목록 도구
+// 8. Thread list tool
 export const getThreadListTool = {
     name: 'get-thread-list',
     config: {
@@ -1756,7 +1741,7 @@ export const getThreadListTool = {
                 return {
                     content: [{
                         type: 'text' as const,
-                        text: JSON.stringify({ message: 'No active debug session' }, null, 2)
+                        text: JSON.stringify({ message: t('tools.noActiveDebugSession') }, null, 2)
                     }]
                 }
             }
@@ -1790,19 +1775,19 @@ export const getThreadListTool = {
             return {
                 content: [{
                     type: 'text' as const,
-                    text: JSON.stringify({ message: 'Failed to get thread list' }, null, 2)
+                    text: JSON.stringify({ message: t('resources.threadListFailed') }, null, 2)
                 }]
             }
         } catch (error: any) {
             return {
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true
             }
         }
     }
 }
 
-// 9. 예외 정보 도구
+// 9. Exception info tool
 export const getExceptionInfoTool = {
     name: 'get-exception-info',
     config: {
@@ -1819,12 +1804,12 @@ export const getExceptionInfoTool = {
                 return {
                     content: [{
                         type: 'text' as const,
-                        text: JSON.stringify({ message: 'No active debug session' }, null, 2)
+                        text: JSON.stringify({ message: t('tools.noActiveDebugSession') }, null, 2)
                     }]
                 }
             }
             
-            // DAP 메시지 수집이 비활성화되어 예외 정보를 수집할 수 없음
+            // Exception details cannot be collected while DAP message collection is disabled.
             return {
                 content: [{
                     type: 'text' as const,
@@ -1839,14 +1824,14 @@ export const getExceptionInfoTool = {
             }
         } catch (error: any) {
             return {
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true
             }
         }
     }
 }
 
-// 10. VSCode 인스턴스 선택 도구
+// 10. VS Code instance selection tool
 export const selectVSCodeInstanceTool = {
     name: 'select-vscode-instance',
     config: {
@@ -1867,7 +1852,7 @@ export const selectVSCodeInstanceTool = {
                 })
             }
             
-            // 포트나 workspace로 선택
+            // Select by port or workspace
             let selectedInstance = null
             
             if (port) {
@@ -1902,14 +1887,14 @@ export const selectVSCodeInstanceTool = {
             }
         } catch (error: any) {
             return {
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true
             }
         }
     }
 }
 
-// 11. Workspace 정보 조회 도구
+// 11. Workspace information tool
 export const getWorkspaceInfoTool = {
     name: 'get-workspace-info',
     config: {
@@ -1925,7 +1910,7 @@ export const getWorkspaceInfoTool = {
                 return {
                     content: [{
                         type: 'text' as const,
-                        text: JSON.stringify({ message: 'No workspace folder open' }, null, 2)
+                        text: JSON.stringify({ message: t('tools.noWorkspaceFolder') }, null, 2)
                     }]
                 }
             }
@@ -1949,14 +1934,14 @@ export const getWorkspaceInfoTool = {
             return asJsonContent(workspaceInfo)
         } catch (error: any) {
             return {
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true
             }
         }
     }
 }
 
-// 12. VSCode 인스턴스 목록 도구
+// 12. VS Code instance list tool
 export const listVSCodeInstancesTool = {
     name: 'list-vscode-instances',
     config: {
@@ -1976,7 +1961,7 @@ export const listVSCodeInstancesTool = {
                 connectionUrl: `http://localhost:${entry.port}/mcp`
             }))
             
-            // 현재 VSCode 인스턴스 정보 추가
+            // Include current VS Code instance information.
             const currentWorkspace = vscode.workspace.workspaceFolders?.[0]
             const currentInfo = currentWorkspace ? {
                 currentInstance: {
@@ -1996,14 +1981,14 @@ export const listVSCodeInstancesTool = {
             })
         } catch (error: any) {
             return {
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true
             }
         }
     }
 }
 
-// 모든 도구 export
+// Export all tools
 export const allTools = [
     addBreakpointTool,
     addBreakpointsTool,
@@ -2023,7 +2008,7 @@ export const allTools = [
     listDebugConfigsTool,
     selectDebugConfigTool,
     
-    // 새로운 도구들 추가
+    // Additional tools
     getDapLogTool,
     getBreakpointsTool,
     getActiveSessionTool,
@@ -2037,7 +2022,7 @@ export const allTools = [
     getThreadListTool,
     getExceptionInfoTool,
     
-    // 새로운 Workspace 관련 도구들 추가
+    // Additional workspace-related tools
     selectVSCodeInstanceTool,
     getWorkspaceInfoTool,
     listVSCodeInstancesTool

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
+import { formatDuration, t } from './i18n'
 
 /**
  * Global state for the extension
@@ -43,7 +44,7 @@ class ExtensionState {
     removeTransport(sessionId: string) {
         if (this._transports[sessionId]) {
             delete this._transports[sessionId]
-            console.log(`Transport removed: ${sessionId}`)
+            console.log(t('state.transportRemoved', { sessionId }))
         }
     }
 
@@ -101,16 +102,16 @@ class ExtensionState {
         const diff = Date.now() - this._serverStartTime.getTime()
         const minutes = Math.floor(diff / 60000)
         const seconds = Math.floor((diff % 60000) / 1000)
-        return `${minutes}분 ${seconds}초`
+        return formatDuration(diff)
     }
 
     // Reset all state
     reset() {
         this._mcpServer = undefined
         this._httpServer = undefined
-        // 모든 세션 정리
+        // Clean up all sessions.
         for (const sessionId in this._transports) {
-            console.log(`Cleaning up session: ${sessionId}`)
+            console.log(t('state.cleaningSession', { sessionId }))
             delete this._transports[sessionId]
         }
         this._currentPort = undefined

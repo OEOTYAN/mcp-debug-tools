@@ -14,13 +14,13 @@ No stdio connection needed — use one-off CLI commands to control the full debu
 Prefer the local CLI bundled with the VS Code extension when available:
 
 ```powershell
-node "$env:USERPROFILE\.vscode\extensions\uhd.mcp-debug-tools-*\out\cli.js" <command> [args]
+node "$env:USERPROFILE\.vscode\extensions\oeotyan.mcp-debug-tools-*\out\cli.js" <command> [args]
 ```
 
 You may also use the published package:
 
 ```bash
-npx @uhd_kr/mcp-debug-tools <command> [args]
+npx mcp-debug-tools <command> [args]
 ```
 
 ### Local Path Fallback (When npx is unavailable)
@@ -29,20 +29,20 @@ If `npx` is unavailable (e.g., offline, network restrictions), you can run the C
 
 **macOS / Linux:**
 ```bash
-node ~/.vscode/extensions/uhd.mcp-debug-tools-*/out/cli.js <command> [args]
+node ~/.vscode/extensions/oeotyan.mcp-debug-tools-*/out/cli.js <command> [args]
 ```
 
 **Windows (PowerShell):**
 ```powershell
-node "$env:USERPROFILE\.vscode\extensions\uhd.mcp-debug-tools-*\out\cli.js" <command> [args]
+node "$env:USERPROFILE\.vscode\extensions\oeotyan.mcp-debug-tools-*\out\cli.js" <command> [args]
 ```
 
 **Windows (CMD):**
 ```cmd
-node "%USERPROFILE%\.vscode\extensions\uhd.mcp-debug-tools-*\out\cli.js" <command> [args]
+node "%USERPROFILE%\.vscode\extensions\oeotyan.mcp-debug-tools-*\out\cli.js" <command> [args]
 ```
 
-> **Tip**: If you installed mcp-debug-tools globally via `npm install -g @uhd_kr/mcp-debug-tools`, you can simply run `mcp-debug-tools <command>` directly without `npx`.
+> **Tip**: If you installed mcp-debug-tools globally via `npm install -g mcp-debug-tools`, you can simply run `mcp-debug-tools <command>` directly without `npx`.
 
 **Key Rules:**
 - `stdout` = pure JSON result. **Always parse stdout only.**

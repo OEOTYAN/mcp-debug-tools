@@ -3,6 +3,7 @@ import * as path from 'path'
 import * as fs from 'fs'
 import { state } from './state'
 import { WorkspaceConfig } from './discovery'
+import { t } from './i18n'
 
 /**
  * Create and show the monitoring panel
@@ -97,7 +98,7 @@ function getWorkspaceConfigStatus(): { exists: boolean; config?: WorkspaceConfig
         
         return { exists: false, path: configPath }
     } catch (error) {
-        console.error('Error reading workspace config:', error)
+        console.error(t('monitor.configReadFailed', { error }))
         return { exists: false }
     }
 }
@@ -107,7 +108,7 @@ function getWorkspaceConfigStatus(): { exists: boolean; config?: WorkspaceConfig
  */
 function generateMcpConfig(): string {
     if (!state.currentPort) {
-        return 'MCP server has not started yet.'
+        return t('monitor.noServerConfig')
     }
     
     const config = {
@@ -132,7 +133,7 @@ function generateMcpConfig(): string {
 function copyMcpConfigToClipboard() {
     const config = generateMcpConfig()
     vscode.env.clipboard.writeText(config).then(() => {
-        vscode.window.showInformationMessage('MCP configuration has been copied to clipboard!')
+        vscode.window.showInformationMessage(t('monitor.configCopied'))
     })
 }
 
@@ -293,7 +294,7 @@ function getWebviewContent(): string {
                 <span class="status-indicator ${serverStatus.isRunning ? 'status-running' : 'status-stopped'}"></span>
                 <strong>${serverStatus.isRunning ? '🟢 Running' : '🔴 Stopped'}</strong>
                 
-                <!-- 서버 제어 버튼 추가 -->
+                <!-- Server control buttons -->
                 <div style="margin-top: 15px;">
                     ${serverStatus.isRunning ?
                         '<button class="button" onclick="stopServer()" style="background-color: #f44336;">🛑 Stop Server</button>' :
@@ -337,7 +338,7 @@ function getWebviewContent(): string {
     "dap-proxy": {
       "command": "node",
       "args": [
-        "/Users/uhd/Projects/mcp-dap-vscode/Package/mcp-debug-tools/out/cli.js",
+        "/path/to/mcp-debug-tools/out/cli.js",
         "--port=8890"
       ]
     }
@@ -345,13 +346,6 @@ function getWebviewContent(): string {
 }</div>
             
             <div class="section-divider"></div>
-            
-            <h2>📧 Feedback</h2>
-            <div class="info-box">
-                <p>We welcome your feedback and suggestions for improvement!</p>
-                <p><strong>Contact:</strong> <a href="mailto:yoo.hwanyong@gmail.com" class="email-link">yoo.hwanyong@gmail.com</a></p>
-            </div>
-            
             <h2>🚀 Upcoming Features</h2>
             <div class="info-box">
                 <p><strong>Features currently under development:</strong></p>

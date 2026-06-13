@@ -41,23 +41,23 @@ export const inputSchemas = {
         maxChildren: z.number().int().min(1).optional().describe('Maximum children to fetch per expanded variable')
     },
     'list-debug-configs': {
-        // 파라미터 없음
+        // No parameters
     },
     'select-debug-config': {
         configName: z.string().describe('Debug configuration name to select')
     },
     
-    // 새로운 도구 스키마들
+    // Additional tool schemas
     'get-dap-log': {
-        // 파라미터 없음 - 모든 DAP 로그 반환
+        // No parameters - returns all DAP logs
     },
     
     'get-breakpoints': {
-        // 파라미터 없음 - 모든 브레이크포인트 반환
+        // No parameters - returns all breakpoints
     },
     
     'get-active-session': {
-        // 파라미터 없음 - 활성 세션 정보 반환
+        // No parameters - returns active session info
     },
     
     'get-debug-console': {
@@ -66,7 +66,7 @@ export const inputSchemas = {
     },
     
     'get-active-stack-item': {
-        // 파라미터 없음 - 현재 활성 스택 아이템 반환
+        // No parameters - returns the current active stack item
     },
     
     'get-call-stack': {
@@ -109,7 +109,7 @@ export const inputSchemas = {
     },
     
     'get-thread-list': {
-        // 파라미터 없음 - 모든 스레드 목록 반환
+        // No parameters - returns all threads
     },
     
     'get-exception-info': {
@@ -117,17 +117,17 @@ export const inputSchemas = {
         includeStackTrace: z.boolean().optional().describe('Include stack trace information')
     },
     
-    // 새로운 Workspace 관련 도구
+    // Additional workspace-related tools
     'select-vscode-instance': {
         port: z.number().optional().describe('Specific VSCode instance port'),
         workspace: z.string().optional().describe('Workspace path to select')
     },
     
     'get-workspace-info': {
-        // 파라미터 없음 - 현재 workspace 정보 반환
+        // No parameters - returns current workspace info
     },
     
     'list-vscode-instances': {
-        // 파라미터 없음 - 모든 활성 VSCode 인스턴스 목록
+        // No parameters - returns all active VS Code instances
     }
 }

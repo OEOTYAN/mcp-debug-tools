@@ -6,10 +6,11 @@ import {
     loadRegistry,
     saveRegistry
 } from './discovery'
+import { t } from './i18n'
 
 /**
- * 글로벌 레지스트리 관리자
- * ~/.mcp-debug-tools/active-configs.json 파일을 관리합니다
+ * Manages the global active instance registry.
+ * Stores active instances in ~/.mcp-debug-tools/active-configs.json.
  */
 export class RegistryManager {
     private registryPath: string
@@ -20,21 +21,21 @@ export class RegistryManager {
     }
     
     /**
-     * 레지스트리 초기화
+     * Initialize the registry manager.
      */
     async initialize(): Promise<void> {
-        // 정기적으로 stale 엔트리 정리 (30초마다)
+        // Periodically clean up stale entries every 30 seconds.
         this.startCleanupTimer()
     }
     
     /**
-     * VSCode 인스턴스 등록
+     * Register a VS Code instance.
      */
     async registerInstance(config: WorkspaceConfig, configPath?: string): Promise<void> {
         try {
             const registry = await loadRegistry(this.registryPath)
             
-            // 새 엔트리 생성
+            // Create a new entry.
             const entry: RegistryEntry = {
                 vscodeInstanceId: config.vscodeInstanceId,
                 workspacePath: config.workspacePath,
@@ -48,68 +49,68 @@ export class RegistryManager {
                 entry.configPath = configPath
             }
             
-            // 기존 엔트리 제거 (같은 workspace)
+            // Remove existing entries for the same workspace.
             registry.activeInstances = registry.activeInstances.filter(
                 e => e.workspacePath !== config.workspacePath
             )
             
-            // 새 엔트리 추가
+            // Add the new entry.
             registry.activeInstances.push(entry)
             registry.lastUpdated = Date.now()
             
-            // 저장
+            // Save the registry.
             await saveRegistry(this.registryPath, registry)
             
-            console.log(`Instance registered: ${config.vscodeInstanceId} at port ${config.port}`)
+            console.log(t('registry.registered', { id: config.vscodeInstanceId, port: config.port }))
         } catch (error) {
-            console.error('Failed to register instance:', error)
+            console.error(t('registry.registerFailed', { error }))
             throw error
         }
     }
     
     /**
-     * VSCode 인스턴스 등록 해제
+     * Unregister a VS Code instance.
      */
     async unregisterInstance(vscodeInstanceId: string): Promise<void> {
         try {
             const registry = await loadRegistry(this.registryPath)
             
-            // 인스턴스 제거
+            // Remove the instance.
             registry.activeInstances = registry.activeInstances.filter(
                 e => e.vscodeInstanceId !== vscodeInstanceId
             )
             registry.lastUpdated = Date.now()
             
-            // 저장
+            // Save the registry.
             await saveRegistry(this.registryPath, registry)
             
-            console.log(`Instance unregistered: ${vscodeInstanceId}`)
+            console.log(t('registry.unregistered', { id: vscodeInstanceId }))
         } catch (error) {
-            console.error('Failed to unregister instance:', error)
+            console.error(t('registry.unregisterFailed', { error }))
         }
     }
     
     /**
-     * 활성 인스턴스 목록 조회
+     * Get active instances.
      */
     async getActiveInstances(): Promise<RegistryEntry[]> {
         try {
             const registry = await loadRegistry(this.registryPath)
             
-            // PID가 살아있는 엔트리만 필터링
+            // Keep entries whose PIDs are still alive.
             const activeInstances = registry.activeInstances.filter(
                 e => isEntryAlive(e)
             )
             
             return activeInstances
         } catch (error) {
-            console.error('Failed to get active instances:', error)
+            console.error(t('registry.activeInstancesFailed', { error }))
             return []
         }
     }
     
     /**
-     * 특정 workspace의 활성 인스턴스 찾기
+     * Find the active instance for a specific workspace.
      */
     async findInstanceByWorkspace(workspacePath: string): Promise<RegistryEntry | null> {
         const instances = await this.getActiveInstances()
@@ -117,24 +118,24 @@ export class RegistryManager {
     }
     
     /**
-     * Stale 엔트리 정리 타이머 시작
+     * Start the stale-entry cleanup timer.
      */
     private startCleanupTimer(): void {
-        // 기존 타이머 정리
+        // Clear any existing timer.
         this.stopCleanupTimer()
         
-        // 30초마다 stale 엔트리 정리
+        // Clean up stale entries every 30 seconds.
         this.cleanupTimer = setInterval(async () => {
             try {
                 await this.cleanupStaleEntries()
             } catch (error) {
-                console.error('Cleanup failed:', error)
+                console.error(t('registry.cleanupFailed', { error }))
             }
         }, 30000)
     }
     
     /**
-     * Stale 엔트리 정리 타이머 중지
+     * Stop the stale-entry cleanup timer.
      */
     stopCleanupTimer(): void {
         if (this.cleanupTimer) {
@@ -144,13 +145,13 @@ export class RegistryManager {
     }
     
     /**
-     * Stale 엔트리 정리
+     * Clean up stale entries.
      */
     private async cleanupStaleEntries(): Promise<void> {
         try {
             const registry = await loadRegistry(this.registryPath)
             
-            // 살아있는 인스턴스만 유지
+            // Keep only live instances.
             const aliveInstances = registry.activeInstances.filter(
                 e => isEntryAlive(e)
             )
@@ -161,26 +162,26 @@ export class RegistryManager {
                 await saveRegistry(this.registryPath, registry)
                 
                 const removed = registry.activeInstances.length - aliveInstances.length
-                console.log(`Cleaned up ${removed} stale entries`)
+                console.log(t('registry.staleCleaned', { count: removed }))
             }
         } catch (error) {
-            console.error('Failed to cleanup stale entries:', error)
+            console.error(t('registry.staleCleanupFailed', { error }))
         }
     }
     
     /**
-     * 정리
+     * Clean up resources.
      */
     async cleanup(vscodeInstanceId?: string): Promise<void> {
-        // 타이머 중지
+        // Stop the timer.
         this.stopCleanupTimer()
         
-        // 인스턴스 등록 해제
+        // Unregister the instance.
         if (vscodeInstanceId) {
             await this.unregisterInstance(vscodeInstanceId)
         }
     }
 }
 
-// 싱글톤 인스턴스
+// Singleton instance.
 export const registryManager = new RegistryManager()

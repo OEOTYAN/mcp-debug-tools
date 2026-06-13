@@ -1,7 +1,7 @@
 /**
  * MCP Debug Tools - Thread Debugging Example
- * Node.js Worker Threads를 사용한 멀티 스레드 디버깅 예제
- * 메모리 구조, 스레드 간 통신, 병렬 처리를 학습할 수 있습니다.
+ * Multi-threaded debugging example using Node.js Worker Threads.
+ * Demonstrates memory layout, inter-thread communication, and parallel processing.
  */
 
 const {
@@ -17,24 +17,24 @@ const os = require('os');
 const path = require('path');
 const { performance } = require('perf_hooks');
 
-// 공유 메모리를 위한 SharedArrayBuffer
+// SharedArrayBuffer for shared memory
 const BUFFER_SIZE = 1024;
 const THREADS_COUNT = os.cpus().length;
 
 /**
- * 워커 스레드에서 실행될 코드
- * 별도의 V8 인스턴스에서 실행됩니다
+ * Code that runs inside worker threads.
+ * Runs in a separate V8 instance.
  */
 if (!isMainThread) {
-    console.log(`[Worker ${threadId}] 스레드 시작, 데이터:`, workerData);
+    console.log(`[Worker ${threadId}] Thread started, data:`, workerData);
     
-    // 워커 스레드의 작업 함수
+    // Worker task function
     function workerTask() {
         const { taskType, data, sharedBuffer } = workerData;
         
         switch (taskType) {
             case 'compute':
-                // CPU 집약적 계산 작업
+                // CPU-intensive computation
                 const result = performHeavyComputation(data);
                 parentPort.postMessage({ 
                     type: 'result', 
@@ -45,7 +45,7 @@ if (!isMainThread) {
                 break;
                 
             case 'sort':
-                // 대량 데이터 정렬
+                // Sort large data
                 const sorted = mergeSort(data);
                 parentPort.postMessage({ 
                     type: 'sorted', 
@@ -56,7 +56,7 @@ if (!isMainThread) {
                 break;
                 
             case 'search':
-                // 병렬 검색 작업
+                // Parallel search task
                 const found = parallelSearch(data.array, data.target);
                 parentPort.postMessage({ 
                     type: 'search_result', 
@@ -67,7 +67,7 @@ if (!isMainThread) {
                 break;
                 
             case 'shared_memory':
-                // SharedArrayBuffer를 사용한 메모리 공유
+                // Shared memory with SharedArrayBuffer
                 if (sharedBuffer) {
                     manipulateSharedMemory(sharedBuffer, threadId);
                 }
@@ -81,7 +81,7 @@ if (!isMainThread) {
         }
     }
     
-    // CPU 집약적 계산 함수 (소수 찾기)
+    // CPU-intensive computation function (prime search)
     function performHeavyComputation(limit) {
         const primes = [];
         
@@ -107,7 +107,7 @@ if (!isMainThread) {
         };
     }
     
-    // 병합 정렬 알고리즘
+    // Merge sort algorithm
     function mergeSort(arr) {
         if (arr.length <= 1) return arr;
         
@@ -136,7 +136,7 @@ if (!isMainThread) {
         return result.concat(left.slice(leftIndex)).concat(right.slice(rightIndex));
     }
     
-    // 병렬 검색 함수
+    // Parallel search function
     function parallelSearch(array, target) {
         const results = [];
         
@@ -153,24 +153,24 @@ if (!isMainThread) {
         return results;
     }
     
-    // SharedArrayBuffer 조작
+    // Manipulate SharedArrayBuffer
     function manipulateSharedMemory(sharedBuffer, workerId) {
         const sharedArray = new Int32Array(sharedBuffer);
         const startIdx = workerId * 10;
         const endIdx = startIdx + 10;
         
-        // 각 워커가 자신의 영역에 데이터 쓰기
+        // Each worker writes to its own region
         for (let i = startIdx; i < endIdx && i < sharedArray.length; i++) {
-            // Atomics를 사용한 안전한 메모리 접근
+            // Safe memory access with Atomics
             const oldValue = Atomics.load(sharedArray, i);
             const newValue = oldValue + workerId * 100;
             Atomics.store(sharedArray, i, newValue);
             
-            // 디버깅을 위한 로그
-            console.log(`[Worker ${workerId}] 메모리[${i}]: ${oldValue} -> ${newValue}`);
+            // Log for debugging
+            console.log(`[Worker ${workerId}] memory[${i}]: ${oldValue} -> ${newValue}`);
         }
         
-        // 동기화 포인트
+        // Synchronization point
         Atomics.notify(sharedArray, 0, 1);
         
         parentPort.postMessage({
@@ -180,12 +180,12 @@ if (!isMainThread) {
         });
     }
     
-    // 메시지 수신 핸들러
+    // Message receive handler
     parentPort.on('message', (msg) => {
-        console.log(`[Worker ${threadId}] 메시지 수신:`, msg);
+        console.log(`[Worker ${threadId}] Message received:`, msg);
         
         if (msg.command === 'stop') {
-            console.log(`[Worker ${threadId}] 종료 요청 받음`);
+            console.log(`[Worker ${threadId}] Stop request received`);
             process.exit(0);
         } else if (msg.command === 'ping') {
             parentPort.postMessage({ 
@@ -196,7 +196,7 @@ if (!isMainThread) {
         }
     });
     
-    // 워커 작업 실행
+    // Run worker task
     try {
         workerTask();
     } catch (error) {
@@ -210,17 +210,17 @@ if (!isMainThread) {
 }
 
 /**
- * 메인 스레드 코드
+ * Main thread code
  */
 if (isMainThread) {
     console.log('=== MCP Debug Tools - Thread Debugging Example ===');
-    console.log(`메인 스레드 ID: ${threadId}`);
-    console.log(`사용 가능한 CPU 코어: ${THREADS_COUNT}`);
+    console.log(`Main thread ID: ${threadId}`);
+    console.log(`Available CPU cores: ${THREADS_COUNT}`);
     console.log('');
     
     /**
-     * 워커 풀 클래스
-     * 여러 워커 스레드를 관리합니다
+     * Worker pool class
+     * Manages multiple worker threads.
      */
     class WorkerPool {
         constructor(size) {
@@ -230,23 +230,23 @@ if (isMainThread) {
             this.activeWorkers = 0;
         }
         
-        // 워커 생성
+        // Create worker
         createWorker(workerData) {
             return new Promise((resolve, reject) => {
                 const worker = new Worker(__filename, { workerData });
                 
                 worker.on('message', (msg) => {
-                    console.log(`[Main] 워커 메시지 수신:`, msg);
+                    console.log(`[Main] Worker message received:`, msg);
                     resolve({ worker, message: msg });
                 });
                 
                 worker.on('error', (error) => {
-                    console.error(`[Main] 워커 에러:`, error);
+                    console.error(`[Main] Worker error:`, error);
                     reject(error);
                 });
                 
                 worker.on('exit', (code) => {
-                    console.log(`[Main] 워커 종료, 코드: ${code}`);
+                    console.log(`[Main] Worker exited, code: ${code}`);
                     this.activeWorkers--;
                 });
                 
@@ -255,7 +255,7 @@ if (isMainThread) {
             });
         }
         
-        // 모든 워커 종료
+        // Terminate all workers
         async terminateAll() {
             const promises = this.workers.map(worker => worker.terminate());
             await Promise.all(promises);
@@ -263,7 +263,7 @@ if (isMainThread) {
             this.activeWorkers = 0;
         }
         
-        // 워커에게 메시지 전송
+        // Send message to workers
         broadcast(message) {
             this.workers.forEach(worker => {
                 worker.postMessage(message);
@@ -272,16 +272,16 @@ if (isMainThread) {
     }
     
     /**
-     * 병렬 작업 실행 함수
+     * Parallel task runner
      */
     async function runParallelTasks() {
-        console.log('1. CPU 집약적 계산 작업 (소수 찾기)');
+        console.log('1. CPU-intensive computation (prime search)');
         console.log('----------------------------------------');
         
         const pool = new WorkerPool(4);
         const computeTasks = [];
         
-        // 여러 워커에서 동시에 소수 계산
+        // Calculate primes concurrently in several workers
         const ranges = [1000, 2000, 3000, 4000];
         
         for (let i = 0; i < ranges.length; i++) {
@@ -294,7 +294,7 @@ if (isMainThread) {
         
         const computeResults = await Promise.all(computeTasks);
         computeResults.forEach((result, index) => {
-            console.log(`범위 ${ranges[index]}까지의 소수:`, result.message);
+            console.log(`Primes up to ${ranges[index]}:`, result.message);
         });
         
         await pool.terminateAll();
@@ -302,13 +302,13 @@ if (isMainThread) {
     }
     
     /**
-     * 데이터 정렬 작업
+     * Data sorting task
      */
     async function runSortingTask() {
-        console.log('2. 병렬 데이터 정렬');
+        console.log('2. Parallel data sorting');
         console.log('----------------------------------------');
         
-        // 큰 배열을 여러 부분으로 나누어 정렬
+        // Split a large array into chunks and sort them
         const bigArray = Array.from({ length: 1000 }, () => Math.floor(Math.random() * 10000));
         const chunkSize = Math.ceil(bigArray.length / 4);
         const chunks = [];
@@ -317,8 +317,8 @@ if (isMainThread) {
             chunks.push(bigArray.slice(i, i + chunkSize));
         }
         
-        console.log(`원본 배열 크기: ${bigArray.length}`);
-        console.log(`청크 수: ${chunks.length}, 청크 크기: ${chunkSize}`);
+        console.log(`Original array size: ${bigArray.length}`);
+        console.log(`Chunk count: ${chunks.length}, chunk size: ${chunkSize}`);
         
         const sortWorkers = [];
         
@@ -340,42 +340,42 @@ if (isMainThread) {
         
         const sortedChunks = await Promise.all(sortWorkers);
         
-        // 정렬된 청크들을 병합
+        // Merge sorted chunks
         const finalSorted = sortedChunks.flat().sort((a, b) => a - b);
-        console.log(`정렬 완료: ${finalSorted.length}개 요소`);
-        console.log(`첫 10개: [${finalSorted.slice(0, 10).join(', ')}]`);
-        console.log(`마지막 10개: [${finalSorted.slice(-10).join(', ')}]`);
+        console.log(`Sorting complete: ${finalSorted.length} elements`);
+        ')}]`);, ')}]`);
+        ')}]`);, ')}]`);
         console.log('');
     }
     
     /**
-     * SharedArrayBuffer를 사용한 메모리 공유
+     * Shared memory using SharedArrayBuffer
      */
     async function runSharedMemoryTask() {
-        console.log('3. SharedArrayBuffer 메모리 공유');
+        console.log('3. SharedArrayBuffer shared memory');
         console.log('----------------------------------------');
         
-        // SharedArrayBuffer 생성 (지원 여부 확인)
+        // Create SharedArrayBuffer and check support
         if (typeof SharedArrayBuffer === 'undefined') {
-            console.log('⚠️ SharedArrayBuffer가 지원되지 않습니다.');
-            console.log('Node.js를 --no-warnings --experimental-worker 플래그와 함께 실행하세요.');
+            console.log('SharedArrayBuffer is not supported.');
+            console.log('Run Node.js with --no-warnings --experimental-worker.');
             return;
         }
         
         const sharedBuffer = new SharedArrayBuffer(BUFFER_SIZE);
         const sharedArray = new Int32Array(sharedBuffer);
         
-        // 초기값 설정
+        // Set initial values
         for (let i = 0; i < sharedArray.length; i++) {
             sharedArray[i] = i;
         }
         
-        console.log(`공유 메모리 크기: ${BUFFER_SIZE} bytes`);
-        console.log(`초기값: [${sharedArray.slice(0, 10).join(', ')}...]`);
+        console.log(`Shared memory size: ${BUFFER_SIZE} bytes`);
+        ')}...]`);, ')}...]`);
         
         const memoryWorkers = [];
         
-        // 4개의 워커가 동시에 메모리 접근
+        // Four workers access memory concurrently
         for (let i = 0; i < 4; i++) {
             const worker = new Worker(__filename, {
                 workerData: {
@@ -397,15 +397,15 @@ if (isMainThread) {
         
         await Promise.all(memoryWorkers);
         
-        console.log(`최종값: [${sharedArray.slice(0, 20).join(', ')}...]`);
+        ')}...]`);, ')}...]`);
         console.log('');
     }
     
     /**
-     * 메시지 채널을 사용한 워커 간 통신
+     * Inter-worker communication using MessageChannel
      */
     async function runInterWorkerCommunication() {
-        console.log('4. 워커 간 직접 통신');
+        console.log('4. Direct inter-worker communication');
         console.log('----------------------------------------');
         
         const channel = new MessageChannel();
@@ -447,33 +447,33 @@ if (isMainThread) {
             })
         ]);
         
-        console.log('워커 1 결과:', results[0]);
-        console.log('워커 2 결과:', results[1]);
+        console.log('Worker 1 result:', results[0]);
+        console.log('Worker 2 result:', results[1]);
         console.log('');
     }
     
     /**
-     * 성능 측정 함수
+     * Performance measurement function
      */
     async function measurePerformance() {
-        console.log('5. 성능 비교: 단일 스레드 vs 멀티 스레드');
+        console.log('5. Performance comparison: single-threaded vs multi-threaded');
         console.log('----------------------------------------');
         
         const testSize = 5000;
         const testArray = Array.from({ length: testSize }, () => Math.random() * 10000);
         
-        // 단일 스레드 정렬
+        // Single-threaded sort
         const singleStart = performance.now();
         const singleSorted = testArray.slice().sort((a, b) => a - b);
         const singleEnd = performance.now();
         const singleTime = singleEnd - singleStart;
         
-        console.log(`단일 스레드 정렬: ${singleTime.toFixed(2)}ms`);
+        console.log(`Single-threaded sort: ${singleTime.toFixed(2)}ms`);
         
-        // 멀티 스레드 정렬
+        // Multi-threaded sort
         const multiStart = performance.now();
         
-        // 배열을 4개로 분할
+        // Split array into four chunks
         const chunkSize = Math.ceil(testArray.length / 4);
         const chunks = [];
         for (let i = 0; i < testArray.length; i += chunkSize) {
@@ -501,36 +501,36 @@ if (isMainThread) {
         const multiEnd = performance.now();
         const multiTime = multiEnd - multiStart;
         
-        console.log(`멀티 스레드 정렬: ${multiTime.toFixed(2)}ms`);
-        console.log(`성능 향상: ${((singleTime / multiTime - 1) * 100).toFixed(1)}%`);
+        console.log(`Multi-threaded sort: ${multiTime.toFixed(2)}ms`);
+        console.log(`Performance gain: ${((singleTime / multiTime - 1) * 100).toFixed(1)}%`);
         console.log('');
     }
     
     /**
-     * 메인 실행 함수
+     * Main execution function
      */
     async function main() {
         try {
-            // 순차적으로 모든 예제 실행
+            // Run all examples sequentially
             await runParallelTasks();
             await runSortingTask();
             await runSharedMemoryTask();
             await runInterWorkerCommunication();
             await measurePerformance();
             
-            console.log('=== 모든 테스트 완료 ===');
+            console.log('=== All tests complete ===');
             console.log('');
-            console.log('디버깅 팁:');
-            console.log('1. 각 워커의 threadId를 확인하여 스레드 구분');
-            console.log('2. 메시지 전달 과정 추적');
-            console.log('3. SharedArrayBuffer의 메모리 변화 관찰');
-            console.log('4. 워커 생성/종료 라이프사이클 확인');
+            console.log('Debugging tips:');
+            console.log('1. Check each worker threadId to distinguish threads');
+            console.log('2. Trace message passing');
+            console.log('3. Observe SharedArrayBuffer memory changes');
+            console.log('4. Inspect worker creation and termination lifecycle');
             
         } catch (error) {
-            console.error('메인 에러:', error);
+            console.error('Main error:', error);
         }
     }
     
-    // 메인 함수 실행
+    // Run main function
     main().catch(console.error);
 }

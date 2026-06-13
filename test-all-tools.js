@@ -1,136 +1,111 @@
 #!/usr/bin/env node
 
-const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
-const { StreamableHTTPClientTransport } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
+const http = require('http');
 
 async function testAllTools() {
-    console.log('🧪 모든 도구 테스트 시작...\n');
-    
-    const results = [];
-    
+    console.log('Starting all-tool test...\n');
+
     try {
-        // HTTP 클라이언트 생성
-        const transport = new StreamableHTTPClientTransport(
-            'http://localhost:8890/mcp'
-        );
-
-        const client = new Client({
-            name: 'test-client',
-            version: '1.0.0'
-        }, {
-            capabilities: {
-                tools: {}
-            }
-        });
-
-        await client.connect(transport);
-        console.log('✅ MCP 서버 연결 성공\n');
-
-        // 테스트할 도구 목록
-        const toolsToTest = [
-            { 
-                name: 'list-breakpoints', 
-                args: {},
-                description: '브레이크포인트 목록 조회'
-            },
-            { 
-                name: 'get-debug-state', 
-                args: {},
-                description: '디버그 상태 조회'
-            },
-            { 
-                name: 'get-workspace-info', 
-                args: {},
-                description: 'Workspace 정보 조회'
-            },
-            { 
-                name: 'list-debug-configs', 
-                args: {},
-                description: '디버그 구성 목록 조회'
-            },
-            { 
-                name: 'get-active-session', 
-                args: {},
-                description: '활성 디버그 세션 조회'
-            }
+        const client = createHttpClient('http://localhost:8890');
+        const tools = [
+            { name: 'list-breakpoints', description: 'List breakpoints' },
+            { name: 'get-debug-state', description: 'Get debug state' },
+            { name: 'get-workspace-info', description: 'Get workspace info' },
+            { name: 'list-debug-configs', description: 'List debug configurations' },
+            { name: 'get-active-session', description: 'Get active debug session' }
         ];
 
-        // 각 도구 테스트
-        for (const tool of toolsToTest) {
-            console.log(`📋 테스트: ${tool.description} (${tool.name})`);
-            const startTime = Date.now();
-            
+        const results = [];
+
+        for (const tool of tools) {
+            console.log(`Test: ${tool.description} (${tool.name})`);
+            const start = Date.now();
+
             try {
-                const result = await client.callTool(tool.name, tool.args);
-                const elapsed = Date.now() - startTime;
-                
-                console.log(`  ✅ 성공 (${elapsed}ms)`);
-                
-                // 결과 요약
-                if (result.content && result.content[0]) {
-                    const content = result.content[0].text;
-                    const preview = content.substring(0, 100);
-                    console.log(`  📄 응답: ${preview}${content.length > 100 ? '...' : ''}`);
-                }
-                
-                results.push({
-                    tool: tool.name,
-                    status: 'success',
-                    time: elapsed,
-                    description: tool.description
-                });
-                
+                const result = await callTool(client, tool.name, {});
+                const elapsed = Date.now() - start;
+                console.log(`  Success (${elapsed}ms)`);
+
+                const content = JSON.stringify(result);
+                const preview = content.substring(0, 100);
+                console.log(`  Response: ${preview}${content.length > 100 ? '...' : ''}`);
+
+                results.push({ tool: tool.name, success: true, time: elapsed });
             } catch (error) {
-                const elapsed = Date.now() - startTime;
-                console.log(`  ❌ 실패 (${elapsed}ms): ${error.message}`);
-                
-                results.push({
-                    tool: tool.name,
-                    status: 'failed',
-                    time: elapsed,
-                    error: error.message,
-                    description: tool.description
-                });
+                const elapsed = Date.now() - start;
+                console.log(`  Failed (${elapsed}ms): ${error.message}`);
+                results.push({ tool: tool.name, success: false, time: elapsed, error: error.message });
             }
-            
-            console.log(); // 줄바꿈
+
+            console.log();
         }
 
-        // 테스트 결과 요약
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        console.log('📊 테스트 결과 요약\n');
-        
-        const successCount = results.filter(r => r.status === 'success').length;
-        const failCount = results.filter(r => r.status === 'failed').length;
+        const successCount = results.filter(r => r.success).length;
+        const failCount = results.length - successCount;
         const avgTime = results.reduce((sum, r) => sum + r.time, 0) / results.length;
-        
-        console.log(`✅ 성공: ${successCount}개`);
-        console.log(`❌ 실패: ${failCount}개`);
-        console.log(`⏱️  평균 응답 시간: ${avgTime.toFixed(2)}ms`);
-        
-        // 실패한 도구 상세
+        const slowest = results.reduce((a, b) => a.time > b.time ? a : b);
+        const fastest = results.reduce((a, b) => a.time < b.time ? a : b);
+
+        console.log('Test summary\n');
+        console.log(`Success: ${successCount}`);
+        console.log(`Failed: ${failCount}`);
+        console.log(`Average response time: ${avgTime.toFixed(2)}ms`);
+
         if (failCount > 0) {
-            console.log('\n❌ 실패한 도구:');
-            results.filter(r => r.status === 'failed').forEach(r => {
+            console.log('\nFailed tools:');
+            results.filter(r => !r.success).forEach(r => {
                 console.log(`  - ${r.tool}: ${r.error}`);
             });
         }
-        
-        // 가장 느린 도구
-        const slowest = results.reduce((max, r) => r.time > max.time ? r : max);
-        console.log(`\n🐢 가장 느린 도구: ${slowest.tool} (${slowest.time}ms)`);
-        
-        // 가장 빠른 도구
-        const fastest = results.reduce((min, r) => r.time < min.time ? r : min);
-        console.log(`🚀 가장 빠른 도구: ${fastest.tool} (${fastest.time}ms)`);
 
-        await client.close();
-        
+        console.log(`\nSlowest tool: ${slowest.tool} (${slowest.time}ms)`);
+        console.log(`Fastest tool: ${fastest.tool} (${fastest.time}ms)`);
     } catch (error) {
-        console.error('❌ 테스트 실패:', error.message);
+        console.error('Test failed:', error.message);
         process.exit(1);
     }
 }
 
-// 실행
-testAllTools().catch(console.error);
+function createHttpClient(baseUrl) {
+    return { baseUrl };
+}
+
+function callTool(client, name, args) {
+    const body = JSON.stringify({
+        jsonrpc: '2.0',
+        id: Date.now(),
+        method: 'tools/call',
+        params: { name, arguments: args }
+    });
+
+    return new Promise((resolve, reject) => {
+        const req = http.request(`${client.baseUrl}/mcp`, {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+                'content-length': Buffer.byteLength(body)
+            }
+        }, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                try {
+                    const parsed = JSON.parse(data);
+                    if (parsed.error) {
+                        reject(new Error(parsed.error.message));
+                    } else {
+                        resolve(parsed.result);
+                    }
+                } catch (error) {
+                    reject(error);
+                }
+            });
+        });
+
+        req.on('error', reject);
+        req.write(body);
+        req.end();
+    });
+}
+
+testAllTools();

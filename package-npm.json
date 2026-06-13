@@ -1,14 +1,14 @@
 {
-  "name": "@uhd_kr/mcp-debug-tools",
+  "name": "mcp-debug-tools",
   "displayName": "MCP Debug Tools",
   "description": "VSCode extension and CLI tool for MCP-based debugging with DAP protocol support",
   "version": "1.0.2",
-  "author": "Hwanyong Yoo",
+  "author": "OEOTYAN",
   "license": "GPL-3.0",
   "icon": "icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/hwanyong/mcp-debug-tools.git"
+    "url": "https://github.com/OEOTYAN/mcp-debug-tools.git"
   },
   "keywords": [
     "vscode-extension",
@@ -33,8 +33,10 @@
   ],
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
+    "typecheck": "tsc -p ./ --noEmit",
+    "bundle": "node esbuild.config.mjs",
+    "compile": "npm run typecheck && npm run bundle",
+    "watch": "node esbuild.config.mjs --watch",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
     "test": "vscode-test",
@@ -42,7 +44,8 @@
     "prepublishOnly": "npm run compile"
   },
   "devDependencies": {
-    "@types/express": "^5.0.3",
+    "@modelcontextprotocol/sdk": "^1.17.1",
+    "@types/json-schema": "^7.0.15",
     "@types/mocha": "^10.0.10",
     "@types/node": "20.x",
     "@types/vscode": "^1.85.0",
@@ -50,15 +53,12 @@
     "@typescript-eslint/parser": "^8.31.1",
     "@vscode/test-cli": "^0.0.11",
     "@vscode/test-electron": "^2.5.2",
-    "eslint": "^9.25.1",
-    "typescript": "^5.8.3"
-  },
-  "dependencies": {
-    "@types/json-schema": "^7.0.15",
-    "json-schema": "^0.4.0",
-    "@modelcontextprotocol/sdk": "^1.17.1",
     "commander": "^14.0.3",
-    "zod": "^3.22.4",
-    "express": "^4.21.2"
-  }
+    "esbuild": "^0.28.1",
+    "eslint": "^9.25.1",
+    "json-schema": "^0.4.0",
+    "typescript": "^5.8.3",
+    "zod": "^3.22.4"
+  },
+  "dependencies": {}
 }

@@ -6,6 +6,7 @@ import { registerCommands, setStatusBarUpdater } from './commands'
 import { updateAllPanels } from './monitor-panel'
 import { ConfigManager } from './config-manager'
 import { registryManager } from './registry-manager'
+import { t } from './i18n'
 
 let statusBarItem: vscode.StatusBarItem
 let configManager: ConfigManager | undefined
@@ -30,16 +31,16 @@ export async function activate(context: vscode.ExtensionContext) {
 
         // Start HTTP server with callback to update panels
         await startHttpServer(app, async () => {
-            // 서버가 시작되면 인스턴스 탐색 정보 등록
+            // Register discovery information once the server starts.
             try {
-                // Workspace 폴더 가져오기
+                // Get the workspace folder.
                 const workspaceFolder = vscode.workspace.workspaceFolders?.[0]
                 if (workspaceFolder) {
-                    // ConfigManager 초기화
+                    // Initialize ConfigManager.
                     configManager = new ConfigManager(workspaceFolder, context.extensionPath)
                     await configManager.initialize(state.currentPort || 3000)
                     
-                    // 글로벌 레지스트리에 등록
+                    // Register in the global registry.
                     await registryManager.initialize()
                     const config = await configManager.loadConfig()
                     if (config) {
@@ -47,10 +48,10 @@ export async function activate(context: vscode.ExtensionContext) {
                         await registryManager.registerInstance(config, configPath)
                     }
                     
-                    console.log('MCP Debug Tools discovery registry initialized')
+                    console.log(t('extension.registryInitialized'))
                 }
             } catch (error) {
-                console.error('Failed to initialize discovery registry:', error)
+                console.error(t('extension.registryInitFailed', { error }))
             }
             
             // Update all active panels when server starts
@@ -69,10 +70,10 @@ export async function activate(context: vscode.ExtensionContext) {
         const dapTrackerDisposable = registerDapTracker(context)
         context.subscriptions.push(dapTrackerDisposable)
 
-        console.log('DAP Proxy extension is now active and will log all DAP messages.')
+        console.log(t('extension.activated'))
     } catch (error) {
-        console.error('Failed to activate DAP Proxy extension:', error)
-        vscode.window.showErrorMessage(`Failed to activate DAP Proxy: ${error}`)
+        console.error(t('extension.activationFailed', { error }))
+        vscode.window.showErrorMessage(t('extension.activationFailed', { error }))
         updateStatusBar('error')
     }
 }
@@ -82,7 +83,7 @@ export async function deactivate() {
         // Update status bar
         updateStatusBar('stopping')
         
-        // 설정 파일 및 레지스트리 정리
+        // Clean up config and registry state.
         if (configManager) {
             const config = await configManager.loadConfig()
             if (config) {
@@ -95,7 +96,7 @@ export async function deactivate() {
         // Close MCP server
         if (state.mcpServer) {
             state.mcpServer.close()
-            console.log('MCP Server deactivated.')
+            console.log(t('extension.serverDeactivated'))
         }
 
         // Stop HTTP server
@@ -109,9 +110,9 @@ export async function deactivate() {
             statusBarItem.dispose()
         }
 
-        console.log('DAP Proxy extension is now deactivated.')
+        console.log(t('extension.deactivated'))
     } catch (error) {
-        console.error('Error during deactivation:', error)
+        console.error(t('extension.deactivationError', { error }))
     }
 }
 
@@ -124,31 +125,31 @@ function updateStatusBar(status: 'initializing' | 'running' | 'stopping' | 'erro
     switch (status) {
         case 'initializing':
             statusBarItem.text = '$(sync~spin) MCP Server starting...'
-            statusBarItem.tooltip = 'MCP Debug Server is starting'
+            statusBarItem.tooltip = t('extension.status.starting')
             statusBarItem.backgroundColor = undefined
             break
         case 'running':
             const port = state.currentPort || '????'
             statusBarItem.text = `$(circle-filled) DAP-MCP:${port}`
-            statusBarItem.tooltip = 'MCP Debug Server is running - Click to open monitor panel'
+            statusBarItem.tooltip = t('extension.status.running')
             statusBarItem.backgroundColor = undefined
             statusBarItem.color = new vscode.ThemeColor('terminal.ansiGreen')
             break
         case 'stopping':
             statusBarItem.text = '$(circle-slash) MCP Server stopping...'
-            statusBarItem.tooltip = 'MCP Debug Server is stopping'
+            statusBarItem.tooltip = t('extension.status.stopping')
             statusBarItem.backgroundColor = undefined
             statusBarItem.color = new vscode.ThemeColor('terminal.ansiYellow')
             break
         case 'stopped':
             statusBarItem.text = '$(circle-slash) DAP-MCP:stopped'
-            statusBarItem.tooltip = 'MCP Debug Server is stopped - Click to open monitor panel'
+            statusBarItem.tooltip = t('extension.status.stopped')
             statusBarItem.backgroundColor = undefined
             statusBarItem.color = new vscode.ThemeColor('terminal.ansiGray')
             break
         case 'error':
             statusBarItem.text = '$(error) MCP Server error'
-            statusBarItem.tooltip = 'MCP Debug Server failed to start - Click to retry'
+            statusBarItem.tooltip = t('extension.status.error')
             statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground')
             statusBarItem.color = undefined
             break

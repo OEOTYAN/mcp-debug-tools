@@ -2,8 +2,8 @@
 
 > **The bridge between AI Agents and VS Code Debugger** — Let your AI assistant set breakpoints, step through code, and inspect variables in real-time.
 
-[![VS Code Marketplace](https://img.shields.io/badge/VS%20Code-Marketplace-blue)](https://marketplace.visualstudio.com/items?itemName=uhd.mcp-debug-tools)
-[![npm](https://img.shields.io/npm/v/@uhd_kr/mcp-debug-tools)](https://www.npmjs.com/package/@uhd_kr/mcp-debug-tools)
+[![VS Code Marketplace](https://img.shields.io/badge/VS%20Code-Marketplace-blue)](https://marketplace.visualstudio.com/items?itemName=oeotyan.mcp-debug-tools)
+[![npm](https://img.shields.io/npm/v/mcp-debug-tools)](https://www.npmjs.com/package/mcp-debug-tools)
 
 ## Why MCP Debug Tools?
 
@@ -26,11 +26,11 @@ Beyond the standard MCP proxy, you can execute debugging actions via **one-off t
 
 ```bash
 # Discover all available tools
-npx @uhd_kr/mcp-debug-tools list
+npx mcp-debug-tools list
 
 # Execute tools directly
-npx @uhd_kr/mcp-debug-tools call add-breakpoint '{"file": "src/app.ts", "line": 15}'
-npx @uhd_kr/mcp-debug-tools call step-over
+npx mcp-debug-tools call add-breakpoint '{"file": "src/app.ts", "line": 15}'
+npx mcp-debug-tools call step-over
 ```
 
 ## 🚀 What's New in v1.0.0
@@ -48,20 +48,14 @@ Run the CLI directly from the VS Code extension's install path — **no internet
 
 ```bash
 # macOS / Linux
-node ~/.vscode/extensions/uhd.mcp-debug-tools-*/out/cli.js call get-active-session
+node ~/.vscode/extensions/oeotyan.mcp-debug-tools-*/out/cli.js call get-active-session
 
 # Windows (PowerShell)
-node "$env:USERPROFILE\.vscode\extensions\uhd.mcp-debug-tools-*\out\cli.js" call get-active-session
+node "$env:USERPROFILE\.vscode\extensions\oeotyan.mcp-debug-tools-*\out\cli.js" call get-active-session
 ```
 
 ### 📖 Comprehensive Tool Documentation
 All **29 debugging tools** are now fully documented in the auto-injected skill file, organized by category with parameters and usage examples.
-
-## ⚠️ Beta Testing
-
-Currently in beta testing. Please report any issues or feedback.
-
-**Contact:** [yoo.hwanyong@gmail.com](mailto:yoo.hwanyong@gmail.com)
 
 ## 🎯 Key Features
 
@@ -91,10 +85,10 @@ Provides debugging capabilities as a server in VSCode.
 ```
 
 **Method 2: Direct Link**
-- [MCP Debug Tools on VSCode Marketplace](https://marketplace.visualstudio.com/items?itemName=uhd.mcp-debug-tools)
+- [MCP Debug Tools on VSCode Marketplace](https://marketplace.visualstudio.com/items?itemName=oeotyan.mcp-debug-tools)
 
 **Method 3: Download Link**
-- [Releases](https://github.com/hwanyong/mcp-debug-tools/releases)
+- [Releases](https://github.com/OEOTYAN/mcp-debug-tools/releases)
 
 ### 2. CLI Tool
 
@@ -102,7 +96,7 @@ Client that connects AI tools with VSCode.
 
 ```bash
 # Run directly with npx (no installation needed)
-npx @uhd_kr/mcp-debug-tools
+npx mcp-debug-tools
 ```
 
 ## 🔧 Configuration
@@ -116,7 +110,7 @@ Add to `mcp.json` or configuration file:
   "mcpServers": {
     "dap-proxy": {
       "command": "npx",
-      "args": ["-y", "@uhd_kr/mcp-debug-tools@latest"],
+      "args": ["-y", "mcp-debug-tools@latest"],
       "env": {}
     }
   }
@@ -127,13 +121,13 @@ Add to `mcp.json` or configuration file:
 
 ```bash
 # Auto-connect (recommended)
-npx @uhd_kr/mcp-debug-tools
+npx mcp-debug-tools
 
 # Specify port
-npx @uhd_kr/mcp-debug-tools --port=8891
+npx mcp-debug-tools --port=8891
 
 # Disable auto-discovery
-npx @uhd_kr/mcp-debug-tools --no-auto
+npx mcp-debug-tools --no-auto
 ```
 
 ### Local Path Fallback (When npx is unavailable)
@@ -142,20 +136,20 @@ If `npx` is unavailable (e.g., offline environment, network restrictions), you c
 
 **macOS / Linux:**
 ```bash
-node ~/.vscode/extensions/uhd.mcp-debug-tools-*/out/cli.js <command> [args]
+node ~/.vscode/extensions/oeotyan.mcp-debug-tools-*/out/cli.js <command> [args]
 ```
 
 **Windows (PowerShell):**
 ```powershell
-node "$env:USERPROFILE\.vscode\extensions\uhd.mcp-debug-tools-*\out\cli.js" <command> [args]
+node "$env:USERPROFILE\.vscode\extensions\oeotyan.mcp-debug-tools-*\out\cli.js" <command> [args]
 ```
 
 **Windows (CMD):**
 ```cmd
-node "%USERPROFILE%\.vscode\extensions\uhd.mcp-debug-tools-*\out\cli.js" <command> [args]
+node "%USERPROFILE%\.vscode\extensions\oeotyan.mcp-debug-tools-*\out\cli.js" <command> [args]
 ```
 
-> **Tip**: If you installed mcp-debug-tools globally via `npm install -g @uhd_kr/mcp-debug-tools`, you can simply run `mcp-debug-tools <command>` directly without `npx`.
+> **Tip**: If you installed mcp-debug-tools globally via `npm install -g mcp-debug-tools`, you can simply run `mcp-debug-tools <command>` directly without `npx`.
 
 ## 🛠️ Supported Features
 
@@ -389,7 +383,7 @@ For the complete rules and patterns, see [`MCP_DEBUG_TOOLS_RULES.md`](./MCP_DEBU
 
 ## 📄 License
 
-GNU General Public License v3.0 - [LICENSE](https://github.com/hwanyong/mcp-debug-tools/blob/main/LICENSE)
+GNU General Public License v3.0 - [LICENSE](https://github.com/OEOTYAN/mcp-debug-tools/blob/main/LICENSE)
 
 ## 🤝 Contributing
 
