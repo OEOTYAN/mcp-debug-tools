@@ -30,7 +30,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
         // Start HTTP server with callback to update panels
         await startHttpServer(app, async () => {
-            // 서버가 시작되면 설정 파일 생성
+            // 서버가 시작되면 인스턴스 탐색 정보 등록
             try {
                 // Workspace 폴더 가져오기
                 const workspaceFolder = vscode.workspace.workspaceFolders?.[0]
@@ -47,10 +47,10 @@ export async function activate(context: vscode.ExtensionContext) {
                         await registryManager.registerInstance(config, configPath)
                     }
                     
-                    console.log('Workspace config and registry initialized')
+                    console.log('MCP Debug Tools discovery registry initialized')
                 }
             } catch (error) {
-                console.error('Failed to initialize workspace config:', error)
+                console.error('Failed to initialize discovery registry:', error)
             }
             
             // Update all active panels when server starts

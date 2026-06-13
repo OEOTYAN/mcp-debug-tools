@@ -28,10 +28,16 @@ export const inputSchemas = {
         config: z.string().describe('Configuration name from launch.json')
     },
     'evaluate-expression': {
-        expression: z.string().describe('Expression to evaluate in debug context')
+        expression: z.string().describe('Expression to evaluate in debug context'),
+        frameId: z.number().optional().describe('Specific stack frame ID to evaluate against'),
+        context: z.enum(['watch', 'repl', 'hover', 'clipboard', 'variables']).optional().describe('DAP evaluate context')
     },
     'inspect-variable': {
-        variableName: z.string().describe('Name of the variable to inspect')
+        variableName: z.string().describe('Name of the variable to inspect'),
+        frameId: z.number().optional().describe('Specific stack frame ID to inspect against'),
+        scopeName: z.string().optional().describe('Filter by scope name'),
+        depth: z.number().int().min(0).optional().describe('Child expansion depth'),
+        maxChildren: z.number().int().min(1).optional().describe('Maximum children to fetch per expanded variable')
     },
     'list-debug-configs': {
         // 파라미터 없음
@@ -69,8 +75,18 @@ export const inputSchemas = {
     },
     
     'get-variables-scope': {
+        threadId: z.number().optional().describe('Specific thread ID; used to pick a frame when frameId is omitted'),
         frameId: z.number().optional().describe('Specific frame ID'),
-        scopeName: z.string().optional().describe('Filter by scope name')
+        frameIndex: z.number().int().min(0).optional().describe('Stack frame index within the thread when frameId is omitted'),
+        scopeName: z.string().optional().describe('Filter by scope name'),
+        depth: z.number().int().min(0).optional().describe('Child expansion depth'),
+        maxChildren: z.number().int().min(1).optional().describe('Maximum children to fetch per scope or expanded variable')
+    },
+
+    'expand-variable': {
+        variablesReference: z.number().int().min(1).describe('DAP variablesReference to expand'),
+        depth: z.number().int().min(0).optional().describe('Child expansion depth'),
+        maxChildren: z.number().int().min(1).optional().describe('Maximum children to fetch per expanded variable')
     },
     
     'get-thread-list': {

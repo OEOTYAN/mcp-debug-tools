@@ -23,6 +23,46 @@ async function createClient(serverUrl: string): Promise<{ client: Client, transp
     return { client, transport }
 }
 
+async function postJsonRpc(serverUrl: string, method: string, params: any, timeoutMs = 30000) {
+    logStderr(`🔗 직접 연결: ${serverUrl}`)
+
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), timeoutMs)
+
+    try {
+        const response = await fetch(serverUrl, {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json'
+            },
+            body: JSON.stringify({
+                jsonrpc: '2.0',
+                id: Date.now(),
+                method,
+                params
+            }),
+            signal: controller.signal
+        })
+
+        const responseText = await response.text()
+        let payload: any
+        try {
+            payload = responseText ? JSON.parse(responseText) : {}
+        } catch {
+            throw new Error(`Invalid JSON response: ${responseText}`)
+        }
+
+        if (!response.ok || payload.error) {
+            throw new Error(payload.error?.message || `HTTP ${response.status}: ${responseText}`)
+        }
+
+        logStderr('✅ 직접 호출 성공')
+        return payload.result
+    } finally {
+        clearTimeout(timeout)
+    }
+}
+
 export async function listToolsAndResources(serverUrl: string) {
     let clientObj
     try {
@@ -61,7 +101,6 @@ export async function listToolsAndResources(serverUrl: string) {
 }
 
 export async function callTool(serverUrl: string, toolName: string, argsStr?: string) {
-    let clientObj
     try {
         let args = {}
         if (argsStr) {
@@ -73,25 +112,13 @@ export async function callTool(serverUrl: string, toolName: string, argsStr?: st
             }
         }
 
-        clientObj = await createClient(serverUrl)
-        const { client } = clientObj
-        
         logStderr(`🛠️ 도구 호출: ${toolName}`)
-        
-        // 타임아웃 Promise 설정 (30초)
-        const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => {
-                reject(new Error(`Tool ${toolName} timed out after 30 seconds`))
-            }, 30000)
-        })
-        
-        const toolPromise = client.callTool({
+
+        const result = await postJsonRpc(serverUrl, 'tools/call', {
             name: toolName,
             arguments: args
         })
-        
-        const result = await Promise.race([toolPromise, timeoutPromise])
-        
+
         // stdout에는 순수 JSON 결과만 출력
         process.stdout.write(JSON.stringify(result, null, 2) + '\n')
     } catch (error: any) {
@@ -99,22 +126,17 @@ export async function callTool(serverUrl: string, toolName: string, argsStr?: st
         process.stdout.write(JSON.stringify({ error: error.message }, null, 2) + '\n')
         process.exit(1)
     } finally {
-        if (clientObj?.transport) {
-            await clientObj.transport.close()
-        }
         process.exit(0)
     }
 }
 
 export async function readResource(serverUrl: string, resourceUri: string) {
-    let clientObj
     try {
-        clientObj = await createClient(serverUrl)
-        const { client } = clientObj
-        
         logStderr(`📖 리소스 읽기: ${resourceUri}`)
-        
-        const result = await client.readResource({ uri: resourceUri })
+
+        const result = await postJsonRpc(serverUrl, 'resources/read', {
+            uri: resourceUri
+        })
         
         // stdout에는 순수 JSON 결과만 출력
         process.stdout.write(JSON.stringify(result, null, 2) + '\n')
@@ -123,9 +145,6 @@ export async function readResource(serverUrl: string, resourceUri: string) {
         process.stdout.write(JSON.stringify({ error: error.message }, null, 2) + '\n')
         process.exit(1)
     } finally {
-        if (clientObj?.transport) {
-            await clientObj.transport.close()
-        }
         process.exit(0)
     }
 }

@@ -2,19 +2,12 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as vscode from 'vscode'
 import { promisify } from 'util'
+import { WorkspaceConfig, getWorkspaceConfigPath } from './discovery'
 
 const writeFile = promisify(fs.writeFile)
 const readFile = promisify(fs.readFile)
 const mkdir = promisify(fs.mkdir)
 const unlink = promisify(fs.unlink)
-
-export interface WorkspaceConfig {
-    vscodeInstanceId: string
-    port: number
-    pid: number
-    workspacePath: string
-    workspaceName: string
-}
 
 /**
  * Workspace 설정 파일 관리자
@@ -24,6 +17,7 @@ export class ConfigManager {
     private configDir: string
     private configPath: string
     private extensionPath: string
+    private config: WorkspaceConfig | null = null
     
     constructor(private workspaceFolder: vscode.WorkspaceFolder | undefined, extensionPath: string) {
         if (!workspaceFolder) {
@@ -31,7 +25,7 @@ export class ConfigManager {
         }
         
         this.configDir = path.join(workspaceFolder.uri.fsPath, '.mcp-debug-tools')
-        this.configPath = path.join(this.configDir, 'config.json')
+        this.configPath = getWorkspaceConfigPath(workspaceFolder.uri.fsPath)
         this.extensionPath = extensionPath
     }
     
@@ -40,10 +34,6 @@ export class ConfigManager {
      */
     async initialize(port: number): Promise<void> {
         try {
-            // 디렉토리 생성 (없으면)
-            await this.ensureConfigDir()
-            
-            // 설정 생성
             const config: WorkspaceConfig = {
                 vscodeInstanceId: this.generateInstanceId(),
                 port,
@@ -51,14 +41,19 @@ export class ConfigManager {
                 workspacePath: this.workspaceFolder!.uri.fsPath,
                 workspaceName: this.workspaceFolder!.name
             }
+            this.config = config
             
-            // 파일 저장
-            await this.saveConfig(config)
+            if (process.env.MCP_DEBUG_TOOLS_WRITE_WORKSPACE_CONFIG === '1') {
+                await this.ensureConfigDir()
+                await this.saveConfig(config)
+                console.log(`Config file created at: ${this.configPath}`)
+            } else {
+                console.log('Workspace config file skipped; using temp registry discovery')
+            }
             
-            // 스킬 문서(CLI 가이드) 복사 주입
-            await this.injectSkillDocument()
-            
-            console.log(`Config file created at: ${this.configPath}`)
+            if (process.env.MCP_DEBUG_TOOLS_INJECT_WORKSPACE_SKILL === '1') {
+                await this.injectSkillDocument()
+            }
         } catch (error) {
             console.error('Failed to initialize config:', error)
             throw error
@@ -111,6 +106,10 @@ export class ConfigManager {
                 ...currentConfig,
                 ...updates
             }
+            this.config = updatedConfig
+            if (process.env.MCP_DEBUG_TOOLS_WRITE_WORKSPACE_CONFIG !== '1') {
+                return
+            }
             await this.saveConfig(updatedConfig)
         } catch (error) {
             console.error('Failed to update config:', error)
@@ -122,6 +121,10 @@ export class ConfigManager {
      * 설정 파일 로드
      */
     async loadConfig(): Promise<WorkspaceConfig | null> {
+        if (this.config) {
+            return this.config
+        }
+
         try {
             const data = await readFile(this.configPath, 'utf8')
             return JSON.parse(data)
@@ -158,6 +161,11 @@ export class ConfigManager {
      * 설정 파일 삭제
      */
     async cleanup(): Promise<void> {
+        this.config = null
+        if (process.env.MCP_DEBUG_TOOLS_WRITE_WORKSPACE_CONFIG !== '1') {
+            return
+        }
+
         try {
             // 파일 삭제
             await unlink(this.configPath)

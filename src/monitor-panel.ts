@@ -2,7 +2,7 @@ import * as vscode from 'vscode'
 import * as path from 'path'
 import * as fs from 'fs'
 import { state } from './state'
-import { WorkspaceConfig } from './config-manager'
+import { WorkspaceConfig } from './discovery'
 
 /**
  * Create and show the monitoring panel

@@ -99,6 +99,53 @@ export function createHttpApp(mcpServer: McpServer): express.Application {
             }
         }
 
+        // resources/read 요청도 one-off CLI에서 빠르게 처리 (Transport 우회)
+        if (req.body?.method === 'resources/read') {
+            const { uri: resourceUri } = req.body.params || {}
+
+            console.info(`📖 [직접 처리] 리소스 읽기: ${resourceUri}`)
+
+            const resource = allResources.find(r => r.uri === resourceUri)
+
+            if (!resource) {
+                res.status(404).json({
+                    jsonrpc: '2.0',
+                    error: {
+                        code: -32601,
+                        message: `Resource not found: ${resourceUri}`
+                    },
+                    id: req.body.id
+                })
+                return
+            }
+
+            try {
+                const startTime = Date.now()
+                const result = await resource.handler(new URL(resourceUri))
+                const elapsed = Date.now() - startTime
+
+                res.json({
+                    jsonrpc: '2.0',
+                    result: result,
+                    id: req.body.id
+                })
+
+                console.info(`✅ [직접 처리] 리소스 읽기 완료: ${resourceUri} (${elapsed}ms)`)
+                return
+            } catch (error: any) {
+                console.error(`❌ [직접 처리] 리소스 읽기 실패: ${resourceUri} - ${error.message}`)
+                res.status(500).json({
+                    jsonrpc: '2.0',
+                    error: {
+                        code: -32603,
+                        message: error.message
+                    },
+                    id: req.body.id
+                })
+                return
+            }
+        }
+
         const sessionId = req.headers['mcp-session-id'] as string | undefined
         let transport: StreamableHTTPServerTransport
 

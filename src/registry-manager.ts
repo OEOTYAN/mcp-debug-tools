@@ -1,47 +1,29 @@
-import * as fs from 'fs'
-import * as path from 'path'
-import * as os from 'os'
-import { promisify } from 'util'
-import { WorkspaceConfig } from './config-manager'
-
-const writeFile = promisify(fs.writeFile)
-const readFile = promisify(fs.readFile)
-const mkdir = promisify(fs.mkdir)
-
-export interface RegistryEntry {
-    vscodeInstanceId: string
-    workspacePath: string
-    workspaceName: string
-    configPath: string
-    port: number
-    pid: number
-}
-
-export interface GlobalRegistry {
-    activeInstances: RegistryEntry[]
-    lastUpdated: number
-}
+import {
+    RegistryEntry,
+    WorkspaceConfig,
+    getRegistryPath,
+    getWorkspaceConfigPath,
+    isEntryAlive,
+    loadRegistry,
+    saveRegistry
+} from './discovery'
 
 /**
  * 글로벌 레지스트리 관리자
  * ~/.mcp-debug-tools/active-configs.json 파일을 관리합니다
  */
 export class RegistryManager {
-    private registryDir: string
     private registryPath: string
     private cleanupTimer?: NodeJS.Timeout
     
     constructor() {
-        this.registryDir = path.join(os.homedir(), '.mcp-debug-tools')
-        this.registryPath = path.join(this.registryDir, 'active-configs.json')
+        this.registryPath = getRegistryPath()
     }
     
     /**
      * 레지스트리 초기화
      */
     async initialize(): Promise<void> {
-        await this.ensureRegistryDir()
-        
         // 정기적으로 stale 엔트리 정리 (30초마다)
         this.startCleanupTimer()
     }
@@ -51,16 +33,19 @@ export class RegistryManager {
      */
     async registerInstance(config: WorkspaceConfig, configPath: string): Promise<void> {
         try {
-            const registry = await this.loadRegistry()
+            const registry = await loadRegistry(this.registryPath)
             
             // 새 엔트리 생성
             const entry: RegistryEntry = {
                 vscodeInstanceId: config.vscodeInstanceId,
                 workspacePath: config.workspacePath,
                 workspaceName: config.workspaceName,
-                configPath,
+                configPath: process.env.MCP_DEBUG_TOOLS_WRITE_WORKSPACE_CONFIG === '1' ?
+                    configPath :
+                    getWorkspaceConfigPath(config.workspacePath),
                 port: config.port,
-                pid: config.pid
+                pid: config.pid,
+                lastSeen: Date.now()
             }
             
             // 기존 엔트리 제거 (같은 workspace)
@@ -73,7 +58,7 @@ export class RegistryManager {
             registry.lastUpdated = Date.now()
             
             // 저장
-            await this.saveRegistry(registry)
+            await saveRegistry(this.registryPath, registry)
             
             console.log(`Instance registered: ${config.vscodeInstanceId} at port ${config.port}`)
         } catch (error) {
@@ -87,7 +72,7 @@ export class RegistryManager {
      */
     async unregisterInstance(vscodeInstanceId: string): Promise<void> {
         try {
-            const registry = await this.loadRegistry()
+            const registry = await loadRegistry(this.registryPath)
             
             // 인스턴스 제거
             registry.activeInstances = registry.activeInstances.filter(
@@ -96,7 +81,7 @@ export class RegistryManager {
             registry.lastUpdated = Date.now()
             
             // 저장
-            await this.saveRegistry(registry)
+            await saveRegistry(this.registryPath, registry)
             
             console.log(`Instance unregistered: ${vscodeInstanceId}`)
         } catch (error) {
@@ -109,11 +94,11 @@ export class RegistryManager {
      */
     async getActiveInstances(): Promise<RegistryEntry[]> {
         try {
-            const registry = await this.loadRegistry()
+            const registry = await loadRegistry(this.registryPath)
             
             // PID가 살아있는 엔트리만 필터링
             const activeInstances = registry.activeInstances.filter(
-                e => this.isInstanceAlive(e)
+                e => isEntryAlive(e)
             )
             
             return activeInstances
@@ -129,61 +114,6 @@ export class RegistryManager {
     async findInstanceByWorkspace(workspacePath: string): Promise<RegistryEntry | null> {
         const instances = await this.getActiveInstances()
         return instances.find(e => e.workspacePath === workspacePath) || null
-    }
-    
-    /**
-     * 레지스트리 로드
-     */
-    private async loadRegistry(): Promise<GlobalRegistry> {
-        try {
-            const data = await readFile(this.registryPath, 'utf8')
-            return JSON.parse(data)
-        } catch (error) {
-            // 파일이 없으면 빈 레지스트리 반환
-            if ((error as any).code === 'ENOENT') {
-                return {
-                    activeInstances: [],
-                    lastUpdated: Date.now()
-                }
-            }
-            throw error
-        }
-    }
-    
-    /**
-     * 레지스트리 저장
-     */
-    private async saveRegistry(registry: GlobalRegistry): Promise<void> {
-        const data = JSON.stringify(registry, null, 2)
-        await writeFile(this.registryPath, data, 'utf8')
-    }
-    
-    /**
-     * 디렉토리 확인 및 생성
-     */
-    private async ensureRegistryDir(): Promise<void> {
-        try {
-            await mkdir(this.registryDir, { recursive: true })
-        } catch (error) {
-            if ((error as any).code !== 'EEXIST') {
-                throw error
-            }
-        }
-    }
-    
-    /**
-     * 인스턴스가 살아있는지 확인 (PID 체크만)
-     */
-    private isInstanceAlive(entry: RegistryEntry): boolean {
-        // PID 체크만 수행
-        try {
-            // process.kill(0)은 프로세스 존재 여부만 확인
-            process.kill(entry.pid, 0)
-            return true
-        } catch (error) {
-            // 프로세스가 없거나 권한이 없음
-            return false
-        }
     }
     
     /**
@@ -218,17 +148,17 @@ export class RegistryManager {
      */
     private async cleanupStaleEntries(): Promise<void> {
         try {
-            const registry = await this.loadRegistry()
+            const registry = await loadRegistry(this.registryPath)
             
             // 살아있는 인스턴스만 유지
             const aliveInstances = registry.activeInstances.filter(
-                e => this.isInstanceAlive(e)
+                e => isEntryAlive(e)
             )
             
             if (aliveInstances.length !== registry.activeInstances.length) {
                 registry.activeInstances = aliveInstances
                 registry.lastUpdated = Date.now()
-                await this.saveRegistry(registry)
+                await saveRegistry(this.registryPath, registry)
                 
                 const removed = registry.activeInstances.length - aliveInstances.length
                 console.log(`Cleaned up ${removed} stale entries`)
