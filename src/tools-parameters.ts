@@ -74,11 +74,18 @@ export const inputSchemas = {
         startFrame: z.number().optional().describe('Start frame index'),
         levels: z.number().optional().describe('Number of frames to retrieve')
     },
+
+    'select-stack-frame': {
+        threadId: z.number().optional().describe('Specific thread ID'),
+        frameId: z.number().optional().describe('Specific frame ID'),
+        frameIndex: z.number().int().min(0).optional().describe('Stack frame index within the thread when frameId is omitted'),
+        revealSource: z.boolean().optional().describe('Open and reveal the frame source location in the editor')
+    },
     
     'get-variables-scope': {
         threadId: z.number().optional().describe('Specific thread ID; used to pick a frame when frameId is omitted'),
         frameId: z.number().optional().describe('Specific frame ID'),
-        frameIndex: z.number().int().min(0).optional().describe('Stack frame index within the thread when frameId is omitted'),
+        frameIndex: z.number().int().min(0).optional().describe('Stack frame index within the thread when frameId is omitted; defaults to the current VS Code active frame'),
         scopeName: z.string().optional().describe('Filter by scope name'),
         includeRegisters: z.boolean().optional().describe('Include CPU register scopes in the result'),
         depth: z.number().int().min(0).optional().describe('Child expansion depth'),

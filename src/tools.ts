@@ -41,17 +41,26 @@ async function resolveFrameId(
     session: vscode.DebugSession,
     args: { threadId?: number, frameId?: number, frameIndex?: number }
 ): Promise<{ frameId?: number, threadId?: number, frame?: any }> {
+    const activeFrameId = getActiveFrameId()
+    const activeThreadId = getActiveThreadId()
+
     if (args.frameId !== undefined) {
         return {
             frameId: args.frameId,
-            threadId: args.threadId || getActiveThreadId()
+            threadId: args.threadId || activeThreadId
         }
     }
 
-    const threadId = args.threadId || getActiveThreadId()
+    if (args.frameIndex === undefined && activeFrameId !== undefined && (!args.threadId || args.threadId === activeThreadId)) {
+        return {
+            frameId: activeFrameId,
+            threadId: activeThreadId
+        }
+    }
+
+    const threadId = args.threadId || activeThreadId
     if (!threadId) {
-        const frameId = getActiveFrameId()
-        return { frameId, threadId }
+        return { frameId: activeFrameId, threadId }
     }
 
     const frameIndex = args.frameIndex || 0
@@ -182,6 +191,62 @@ async function getFrameScopes(
     }
 
     return allScopes
+}
+
+function summarizeActiveStackItem() {
+    const activeStackItem = vscode.debug.activeStackItem
+    if (!activeStackItem) {
+        return undefined
+    }
+
+    const result: any = {
+        type: 'frameId' in activeStackItem ? 'stackFrame' : 'thread',
+        sessionId: activeStackItem.session.id,
+        sessionName: activeStackItem.session.name,
+        sessionType: activeStackItem.session.type,
+        threadId: activeStackItem.threadId
+    }
+
+    if ('frameId' in activeStackItem) {
+        result.frameId = (activeStackItem as any).frameId
+    }
+
+    return result
+}
+
+function sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+async function revealFrameSource(frame: any): Promise<any> {
+    if (!frame?.source?.path || frame.line === undefined || frame.line <= 0) {
+        return {
+            revealed: false,
+            reason: 'Frame has no file source location'
+        }
+    }
+
+    const uri = vscode.Uri.file(frame.source.path)
+    const position = new vscode.Position(Math.max(frame.line - 1, 0), Math.max((frame.column || 1) - 1, 0))
+    const document = await vscode.workspace.openTextDocument(uri)
+    const editor = await vscode.window.showTextDocument(document, {
+        preview: false,
+        preserveFocus: false,
+        selection: new vscode.Range(position, position)
+    })
+    editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenterIfOutsideViewport)
+
+    return {
+        revealed: true,
+        file: uri.fsPath,
+        line: frame.line,
+        column: frame.column,
+        activeEditor: {
+            file: vscode.window.activeTextEditor?.document.uri.fsPath,
+            line: vscode.window.activeTextEditor ? vscode.window.activeTextEditor.selection.active.line + 1 : undefined,
+            column: vscode.window.activeTextEditor ? vscode.window.activeTextEditor.selection.active.character + 1 : undefined
+        }
+    }
 }
 
 // 브레이크포인트 추가
@@ -1184,9 +1249,8 @@ export const getActiveStackItemTool = {
     },
     handler: async (args: any) => {
         try {
-            const activeStackItem = vscode.debug.activeStackItem
-            
-            if (!activeStackItem) {
+            const itemInfo = summarizeActiveStackItem()
+            if (!itemInfo) {
                 return {
                     content: [{
                         type: 'text' as const,
@@ -1194,21 +1258,7 @@ export const getActiveStackItemTool = {
                     }]
                 }
             }
-            
-            const itemInfo: any = {
-                type: 'frameId' in activeStackItem ? 'stackFrame' : 'thread',
-                sessionId: activeStackItem.session.id,
-                sessionName: activeStackItem.session.name,
-                sessionType: activeStackItem.session.type
-            }
-            
-            if ('frameId' in activeStackItem) {
-                itemInfo.frameId = (activeStackItem as any).frameId
-                itemInfo.threadId = activeStackItem.threadId
-            } else {
-                itemInfo.threadId = activeStackItem.threadId
-            }
-            
+
             return {
                 content: [{
                     type: 'text' as const,
@@ -1312,6 +1362,189 @@ export const getCallStackTool = {
     }
 }
 
+// 6-1. 콜스택 프레임 선택 및 UI 이동 도구
+export const selectStackFrameTool = {
+    name: 'select-stack-frame',
+    config: {
+        title: 'Select Stack Frame',
+        description: 'Select a stack frame and reveal its source location in VS Code',
+        inputSchema: inputSchemas['select-stack-frame']
+    },
+    handler: async (args: any) => {
+        try {
+            const {
+                threadId,
+                frameId,
+                frameIndex = 0,
+                revealSource = true
+            } = args
+            const session = vscode.debug.activeDebugSession
+
+            if (!session) {
+                return asJsonContent({ message: 'No active debug session' })
+            }
+
+            let targetThreadId = threadId || getActiveThreadId()
+            if (!targetThreadId) {
+                const threadsResponse = await session.customRequest('threads')
+                targetThreadId = threadsResponse?.threads?.[0]?.id
+            }
+
+            if (!targetThreadId) {
+                return asJsonContent({ message: 'No thread available' })
+            }
+
+            const stackResponse = await session.customRequest('stackTrace', {
+                threadId: targetThreadId,
+                startFrame: 0,
+                levels: 100
+            })
+            const frames = stackResponse?.stackFrames || []
+            const targetIndex = frameId !== undefined ?
+                frames.findIndex((frame: any) => frame.id === frameId) :
+                frameIndex
+            const targetFrame = frames[targetIndex]
+
+            if (!targetFrame) {
+                return asJsonContent({
+                    message: 'Stack frame not found',
+                    threadId: targetThreadId,
+                    frameId,
+                    frameIndex,
+                    totalFrames: stackResponse?.totalFrames || frames.length
+                })
+            }
+
+            const before = summarizeActiveStackItem()
+            const commandErrors = []
+
+            try {
+                await vscode.commands.executeCommand('workbench.action.debug.callStackTop')
+            } catch (error: any) {
+                commandErrors.push(`workbench.action.debug.callStackTop: ${error?.message || String(error)}`)
+            }
+
+            for (let i = 0; i < targetIndex; i++) {
+                try {
+                    await vscode.commands.executeCommand('workbench.action.debug.callStackDown')
+                } catch (error: any) {
+                    commandErrors.push(`workbench.action.debug.callStackDown[${i}]: ${error?.message || String(error)}`)
+                    break
+                }
+            }
+
+            if (targetIndex > 0) {
+                await sleep(100)
+            }
+
+            const activeAfterCommands = summarizeActiveStackItem()
+            if (activeAfterCommands?.type !== 'stackFrame' || activeAfterCommands.frameId !== targetFrame.id) {
+                try {
+                    await vscode.commands.executeCommand('workbench.action.debug.callStackTop')
+                    for (let i = 0; i < targetIndex; i++) {
+                        await vscode.commands.executeCommand('workbench.action.debug.callStackDown')
+                    }
+                    await sleep(100)
+                } catch (error: any) {
+                    commandErrors.push(`callStack retry: ${error?.message || String(error)}`)
+                }
+            }
+
+            let after = summarizeActiveStackItem()
+            if (after?.type !== 'stackFrame' || after.frameId !== targetFrame.id) {
+                try {
+                    await vscode.commands.executeCommand('workbench.action.debug.callStackTop')
+                    await sleep(50)
+                    for (let i = 0; i < targetIndex; i++) {
+                        await vscode.commands.executeCommand('workbench.action.debug.callStackDown')
+                        await sleep(50)
+                    }
+                    await sleep(100)
+                } catch (error: any) {
+                    commandErrors.push(`callStack slow retry: ${error?.message || String(error)}`)
+                }
+            }
+
+            after = summarizeActiveStackItem()
+
+            if (after?.type !== 'stackFrame' || after.frameId !== targetFrame.id) {
+                try {
+                    await vscode.commands.executeCommand('workbench.action.debug.callStackBottom')
+                    const fromBottomSteps = Math.max(frames.length - targetIndex - 1, 0)
+                    for (let i = 0; i < fromBottomSteps; i++) {
+                        await vscode.commands.executeCommand('workbench.action.debug.callStackUp')
+                    }
+                    await sleep(100)
+                } catch (error: any) {
+                    commandErrors.push(`callStack bottom retry: ${error?.message || String(error)}`)
+                }
+            }
+
+            after = summarizeActiveStackItem()
+
+            if (after?.type !== 'stackFrame' || after.frameId !== targetFrame.id) {
+                try {
+                    await vscode.commands.executeCommand('workbench.action.debug.callStackTop')
+                    await sleep(100)
+                    after = summarizeActiveStackItem()
+                } catch (error: any) {
+                    commandErrors.push(`callStack top reset: ${error?.message || String(error)}`)
+                }
+            }
+
+            if (after?.type === 'stackFrame' && after.frameId === frames[0]?.id && targetIndex > 0) {
+                try {
+                    for (let i = 0; i < targetIndex; i++) {
+                        await vscode.commands.executeCommand('workbench.action.debug.callStackDown')
+                        await sleep(100)
+                    }
+                    await sleep(150)
+                } catch (error: any) {
+                    commandErrors.push(`callStack final down: ${error?.message || String(error)}`)
+                }
+            }
+
+            after = summarizeActiveStackItem()
+
+            if (after?.type !== 'stackFrame' || after.frameId !== targetFrame.id) {
+                commandErrors.push('VS Code did not expose a command path that changed debug.activeStackItem to the target frame')
+            }
+
+            const sourceReveal = revealSource ? await revealFrameSource(targetFrame) : undefined
+            after = summarizeActiveStackItem()
+
+            return asJsonContent({
+                threadId: targetThreadId,
+                frameIndex: targetIndex,
+                frameId: targetFrame.id,
+                frame: {
+                    id: targetFrame.id,
+                    name: targetFrame.name,
+                    source: targetFrame.source ? {
+                        name: targetFrame.source.name,
+                        path: targetFrame.source.path,
+                        sourceReference: targetFrame.source.sourceReference
+                    } : null,
+                    line: targetFrame.line,
+                    column: targetFrame.column,
+                    endLine: targetFrame.endLine,
+                    endColumn: targetFrame.endColumn
+                },
+                activeStackItemBefore: before,
+                activeStackItemAfter: after,
+                debugUiSynced: after?.type === 'stackFrame' && after.frameId === targetFrame.id,
+                sourceReveal,
+                commandErrors
+            })
+        } catch (error: any) {
+            return {
+                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                isError: true
+            }
+        }
+    }
+}
+
 // 7. 변수/스코프 도구
 export const getVariablesScopeTool = {
     name: 'get-variables-scope',
@@ -1325,7 +1558,7 @@ export const getVariablesScopeTool = {
             const {
                 threadId,
                 frameId,
-                frameIndex = 0,
+                frameIndex,
                 scopeName,
                 includeRegisters = false,
                 depth = DEFAULT_EXPAND_DEPTH,
@@ -1797,6 +2030,7 @@ export const allTools = [
     getDebugConsoleTool,
     getActiveStackItemTool,
     getCallStackTool,
+    selectStackFrameTool,
     getVariablesScopeTool,
     getStackVariablesTool,
     expandVariableTool,

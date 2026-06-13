@@ -96,6 +96,7 @@ node "%USERPROFILE%\.vscode\extensions\uhd.mcp-debug-tools-*\out\cli.js" <comman
 |------|--------|-------------|
 | `get-call-stack` | `threadId?`, `startFrame?`, `levels?` | Get call stack frames |
 | `get-active-stack-item` | — | Get the currently active stack frame |
+| `select-stack-frame` | `threadId?`, `frameId?`, `frameIndex?`, `revealSource?` | Select a stack frame in VS Code and reveal its source location |
 | `get-variables-scope` | `threadId?`, `frameId?`, `frameIndex?`, `scopeName?`, `includeRegisters?`, `depth?`, `maxChildren?` | Get variables for the active or specified frame, optionally expanded |
 | `get-stack-variables` | `threadId?`, `startFrame?`, `levels?`, `scopeName?`, `includeRegisters?`, `depth?`, `maxChildren?` | Get stack frames and variables for each frame in one request |
 | `expand-variable` | `variablesReference`, `depth?`, `maxChildren?` | Expand a DAP variable reference, optionally several levels deep |
@@ -123,6 +124,7 @@ npx mcp-debug-tools call start-debug '{"config": "Launch Program"}'
 
 # Step and inspect
 npx mcp-debug-tools call step-over
+npx mcp-debug-tools call select-stack-frame '{"frameIndex": 1}'
 npx mcp-debug-tools call get-variables-scope
 npx mcp-debug-tools call get-variables-scope '{"frameIndex": 1, "depth": 2, "maxChildren": 50}'
 npx mcp-debug-tools call get-stack-variables '{"levels": 8, "depth": 1, "maxChildren": 50}'
@@ -136,6 +138,8 @@ npx mcp-debug-tools call evaluate-expression '{"expression": "arr.length"}'
 npx mcp-debug-tools read "dap-log://current"
 npx mcp-debug-tools read "debug://active-session"
 ```
+
+After `select-stack-frame`, call `get-variables-scope` without a frame argument to inspect the frame selected in the VS Code UI. Pass `frameIndex` or `frameId` only when you want to inspect a different frame without changing the UI selection.
 
 ## Standard Debugging Workflow
 
