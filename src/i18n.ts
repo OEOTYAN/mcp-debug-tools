@@ -376,6 +376,22 @@ const messages: Record<string, Record<Locale, MessageValue>> = {
         en: 'MCP server failed to start. Click to retry.',
         zh: 'MCP 服务器启动失败。点击重试。'
     },
+    'extension.statusText.starting': {
+        en: 'MCP Server starting...',
+        zh: 'MCP 服务器启动中...'
+    },
+    'extension.statusText.stopping': {
+        en: 'MCP Server stopping...',
+        zh: 'MCP 服务器停止中...'
+    },
+    'extension.statusText.stopped': {
+        en: 'DAP-MCP:stopped',
+        zh: 'DAP-MCP:已停止'
+    },
+    'extension.statusText.error': {
+        en: 'MCP Server error',
+        zh: 'MCP 服务器错误'
+    },
 
     'commands.addBreakpointFailed': {
         en: ({ error }) => `Failed to add breakpoint: ${error}`,
@@ -478,6 +494,142 @@ const messages: Record<string, Record<Locale, MessageValue>> = {
     'monitor.configCopied': {
         en: 'MCP configuration has been copied to the clipboard.',
         zh: 'MCP 配置已复制到剪贴板。'
+    },
+    'monitor.title': {
+        en: 'DAP Proxy Monitor',
+        zh: 'DAP 代理监控'
+    },
+    'monitor.refresh': {
+        en: 'Refresh',
+        zh: '刷新'
+    },
+    'monitor.betaNoticeTitle': {
+        en: 'Beta Testing Notice',
+        zh: 'Beta 测试提示'
+    },
+    'monitor.betaNoticeBody': {
+        en: 'This program is currently in beta testing phase. Please report any issues or provide feedback.',
+        zh: '该程序目前处于 Beta 测试阶段。如遇到问题，欢迎反馈。'
+    },
+    'monitor.serverStatus': {
+        en: 'MCP Server Status',
+        zh: 'MCP 服务器状态'
+    },
+    'monitor.running': {
+        en: 'Running',
+        zh: '运行中'
+    },
+    'monitor.stopped': {
+        en: 'Stopped',
+        zh: '已停止'
+    },
+    'monitor.stopServer': {
+        en: 'Stop Server',
+        zh: '停止服务器'
+    },
+    'monitor.startServer': {
+        en: 'Start Server',
+        zh: '启动服务器'
+    },
+    'monitor.configPath': {
+        en: 'Config Path:',
+        zh: '配置路径:'
+    },
+    'monitor.workspace': {
+        en: 'Workspace:',
+        zh: '工作区:'
+    },
+    'monitor.instanceId': {
+        en: 'Instance ID:',
+        zh: '实例 ID:'
+    },
+    'monitor.pid': {
+        en: 'PID:',
+        zh: 'PID:'
+    },
+    'monitor.noWorkspaceConfig': {
+        en: 'No workspace configuration file found.',
+        zh: '未找到工作区配置文件。'
+    },
+    'monitor.host': {
+        en: 'Host:',
+        zh: '主机:'
+    },
+    'monitor.port': {
+        en: 'Port:',
+        zh: '端口:'
+    },
+    'monitor.serverUrl': {
+        en: 'Server URL:',
+        zh: '服务器 URL:'
+    },
+    'monitor.startTime': {
+        en: 'Start Time:',
+        zh: '启动时间:'
+    },
+    'monitor.uptime': {
+        en: 'Uptime:',
+        zh: '运行时长:'
+    },
+    'monitor.unknown': {
+        en: 'Unknown',
+        zh: '未知'
+    },
+    'monitor.notAvailable': {
+        en: 'Not available',
+        zh: '不可用'
+    },
+    'monitor.workspaceConfig': {
+        en: 'Workspace Configuration',
+        zh: '工作区配置'
+    },
+    'monitor.currentLimitations': {
+        en: 'Current Limitations',
+        zh: '当前限制'
+    },
+    'monitor.limitationSingleSession': {
+        en: 'Only one debugging session per server is supported',
+        zh: '每个服务器当前仅支持一个调试会话'
+    },
+    'monitor.limitationMultipleSessions': {
+        en: 'For multiple simultaneous debugging sessions, you need to change the port in MCP configuration',
+        zh: '如需同时运行多个调试会话，需要在 MCP 配置中使用不同端口'
+    },
+    'monitor.multipleSessions': {
+        en: 'Multiple Debugging Sessions',
+        zh: '多个调试会话'
+    },
+    'monitor.multipleSessionsHelp': {
+        en: 'To run multiple debugging sessions simultaneously, modify your MCP configuration with different ports:',
+        zh: '要同时运行多个调试会话，请在 MCP 配置中使用不同端口:'
+    },
+    'monitor.upcomingFeatures': {
+        en: 'Upcoming Features',
+        zh: '后续功能'
+    },
+    'monitor.featuresIntro': {
+        en: 'Features currently under development:',
+        zh: '正在开发中的功能:'
+    },
+    'monitor.featureMultiSessionTitle': {
+        en: 'Multi-Session Support:',
+        zh: '多会话支持:'
+    },
+    'monitor.featureMultiSessionBody': {
+        en: 'Support for multiple debugging sessions on a single server. This will allow you to debug multiple applications simultaneously without needing separate MCP configurations.',
+        zh: '在单个服务器上支持多个调试会话，让你无需拆分 MCP 配置也能同时调试多个应用。'
+    },
+    'monitor.featureDataStructuresTitle': {
+        en: 'Customizable Data Structures:',
+        zh: '可定制数据结构:'
+    },
+    'monitor.featureDataStructuresBody': {
+        en: 'Unified tool integration to reduce frequent tool calls. This feature will consolidate multiple tools into one, optimizing performance and reducing the overhead of multiple tool invocations.',
+        zh: '通过统一工具集成减少频繁调用，将多个工具收敛为更少入口，优化性能并降低调用开销。'
+    },
+    'monitor.featuresOutro': {
+        en: 'These features are expected to significantly improve the debugging experience and tool efficiency.',
+        zh: '这些功能将进一步提升调试体验和工具效率。'
     },
 
     'registry.registered': {

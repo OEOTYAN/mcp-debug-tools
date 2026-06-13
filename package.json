@@ -1,7 +1,7 @@
 {
   "name": "mcp-debug-tools",
-  "displayName": "MCP Debug Tools",
-  "description": "VSCode extension for MCP-based debugging with DAP protocol support",
+  "displayName": "%extension.displayName%",
+  "description": "%extension.description%",
   "version": "1.0.2",
   "publisher": "oeotyan",
   "author": "OEOTYAN",
@@ -36,13 +36,13 @@
     "commands": [
       {
         "command": "dap-proxy.addUnboundBreakpoint",
-        "title": "Add Breakpoint",
-        "category": "DAP Proxy"
+        "title": "%command.addBreakpoint.title%",
+        "category": "%command.category%"
       },
       {
         "command": "dap-proxy.openMonitorPanel",
-        "title": "Open Monitor Panel",
-        "category": "DAP Proxy"
+        "title": "%command.openMonitorPanel.title%",
+        "category": "%command.category%"
       }
     ]
   },

@@ -6,13 +6,15 @@ import { registerCommands, setStatusBarUpdater } from './commands'
 import { updateAllPanels } from './monitor-panel'
 import { ConfigManager } from './config-manager'
 import { registryManager } from './registry-manager'
-import { t } from './i18n'
+import { setLocale, t } from './i18n'
 
 let statusBarItem: vscode.StatusBarItem
 let configManager: ConfigManager | undefined
 
 export async function activate(context: vscode.ExtensionContext) {
     try {
+        setLocale(vscode.env.language)
+
         // Create status bar item
         statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100)
         statusBarItem.command = 'dap-proxy.openMonitorPanel'
@@ -124,7 +126,7 @@ function updateStatusBar(status: 'initializing' | 'running' | 'stopping' | 'erro
     
     switch (status) {
         case 'initializing':
-            statusBarItem.text = '$(sync~spin) MCP Server starting...'
+            statusBarItem.text = `$(sync~spin) ${t('extension.statusText.starting')}`
             statusBarItem.tooltip = t('extension.status.starting')
             statusBarItem.backgroundColor = undefined
             break
@@ -136,19 +138,19 @@ function updateStatusBar(status: 'initializing' | 'running' | 'stopping' | 'erro
             statusBarItem.color = new vscode.ThemeColor('terminal.ansiGreen')
             break
         case 'stopping':
-            statusBarItem.text = '$(circle-slash) MCP Server stopping...'
+            statusBarItem.text = `$(circle-slash) ${t('extension.statusText.stopping')}`
             statusBarItem.tooltip = t('extension.status.stopping')
             statusBarItem.backgroundColor = undefined
             statusBarItem.color = new vscode.ThemeColor('terminal.ansiYellow')
             break
         case 'stopped':
-            statusBarItem.text = '$(circle-slash) DAP-MCP:stopped'
+            statusBarItem.text = `$(circle-slash) ${t('extension.statusText.stopped')}`
             statusBarItem.tooltip = t('extension.status.stopped')
             statusBarItem.backgroundColor = undefined
             statusBarItem.color = new vscode.ThemeColor('terminal.ansiGray')
             break
         case 'error':
-            statusBarItem.text = '$(error) MCP Server error'
+            statusBarItem.text = `$(error) ${t('extension.statusText.error')}`
             statusBarItem.tooltip = t('extension.status.error')
             statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground')
             statusBarItem.color = undefined

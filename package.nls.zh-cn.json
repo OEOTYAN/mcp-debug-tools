@@ -1,0 +1,7 @@
+{
+  "extension.displayName": "MCP 调试工具",
+  "extension.description": "基于 MCP 和 DAP 协议的 VS Code 调试扩展",
+  "command.addBreakpoint.title": "添加断点",
+  "command.openMonitorPanel.title": "打开监控面板",
+  "command.category": "DAP 代理"
+}
