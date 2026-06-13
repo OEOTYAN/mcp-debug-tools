@@ -36,6 +36,7 @@ export const inputSchemas = {
         variableName: z.string().describe('Name of the variable to inspect'),
         frameId: z.number().optional().describe('Specific stack frame ID to inspect against'),
         scopeName: z.string().optional().describe('Filter by scope name'),
+        includeRegisters: z.boolean().optional().describe('Include register scopes when searching variables'),
         depth: z.number().int().min(0).optional().describe('Child expansion depth'),
         maxChildren: z.number().int().min(1).optional().describe('Maximum children to fetch per expanded variable')
     },
@@ -79,6 +80,17 @@ export const inputSchemas = {
         frameId: z.number().optional().describe('Specific frame ID'),
         frameIndex: z.number().int().min(0).optional().describe('Stack frame index within the thread when frameId is omitted'),
         scopeName: z.string().optional().describe('Filter by scope name'),
+        includeRegisters: z.boolean().optional().describe('Include CPU register scopes in the result'),
+        depth: z.number().int().min(0).optional().describe('Child expansion depth'),
+        maxChildren: z.number().int().min(1).optional().describe('Maximum children to fetch per scope or expanded variable')
+    },
+
+    'get-stack-variables': {
+        threadId: z.number().optional().describe('Specific thread ID'),
+        startFrame: z.number().int().min(0).optional().describe('Start frame index'),
+        levels: z.number().int().min(1).optional().describe('Number of stack frames to retrieve'),
+        scopeName: z.string().optional().describe('Filter by scope name'),
+        includeRegisters: z.boolean().optional().describe('Include CPU register scopes in the result'),
         depth: z.number().int().min(0).optional().describe('Child expansion depth'),
         maxChildren: z.number().int().min(1).optional().describe('Maximum children to fetch per scope or expanded variable')
     },

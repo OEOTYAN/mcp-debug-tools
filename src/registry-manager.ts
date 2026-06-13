@@ -2,7 +2,6 @@ import {
     RegistryEntry,
     WorkspaceConfig,
     getRegistryPath,
-    getWorkspaceConfigPath,
     isEntryAlive,
     loadRegistry,
     saveRegistry
@@ -31,7 +30,7 @@ export class RegistryManager {
     /**
      * VSCode 인스턴스 등록
      */
-    async registerInstance(config: WorkspaceConfig, configPath: string): Promise<void> {
+    async registerInstance(config: WorkspaceConfig, configPath?: string): Promise<void> {
         try {
             const registry = await loadRegistry(this.registryPath)
             
@@ -40,12 +39,13 @@ export class RegistryManager {
                 vscodeInstanceId: config.vscodeInstanceId,
                 workspacePath: config.workspacePath,
                 workspaceName: config.workspaceName,
-                configPath: process.env.MCP_DEBUG_TOOLS_WRITE_WORKSPACE_CONFIG === '1' ?
-                    configPath :
-                    getWorkspaceConfigPath(config.workspacePath),
                 port: config.port,
                 pid: config.pid,
                 lastSeen: Date.now()
+            }
+
+            if (process.env.MCP_DEBUG_TOOLS_WRITE_WORKSPACE_CONFIG === '1' && configPath) {
+                entry.configPath = configPath
             }
             
             // 기존 엔트리 제거 (같은 workspace)

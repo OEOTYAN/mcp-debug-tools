@@ -16,6 +16,7 @@ import {
 
 const DEFAULT_MAX_CHILDREN = 100
 const DEFAULT_EXPAND_DEPTH = 0
+const REGISTER_SCOPE_NAMES = new Set(['Registers', 'CPU Registers'])
 
 function asJsonContent(value: unknown) {
     return {
@@ -82,6 +83,18 @@ function summarizeVariable(variable: any) {
     }
 }
 
+function shouldIncludeScope(scope: any, scopeName?: string, includeRegisters = false): boolean {
+    if (scopeName && scope.name !== scopeName) {
+        return false
+    }
+
+    if (!includeRegisters && REGISTER_SCOPE_NAMES.has(scope.name)) {
+        return false
+    }
+
+    return true
+}
+
 async function getExpandedVariables(
     session: vscode.DebugSession,
     variablesReference: number,
@@ -109,6 +122,66 @@ async function getExpandedVariables(
         }
         return summarized
     }))
+}
+
+async function getFrameScopes(
+    session: vscode.DebugSession,
+    frameId: number,
+    options: {
+        scopeName?: string,
+        includeRegisters?: boolean,
+        depth?: number,
+        maxChildren?: number
+    } = {}
+): Promise<any[]> {
+    const {
+        scopeName,
+        includeRegisters = false,
+        depth = DEFAULT_EXPAND_DEPTH,
+        maxChildren = DEFAULT_MAX_CHILDREN
+    } = options
+
+    const scopesResponse = await session.customRequest('scopes', { frameId })
+    const scopes = scopesResponse?.scopes || []
+    const allScopes = []
+
+    for (const scope of scopes) {
+        if (!shouldIncludeScope(scope, scopeName, includeRegisters)) continue
+
+        const variablesResponse = await session.customRequest('variables', {
+            variablesReference: scope.variablesReference,
+            count: maxChildren
+        })
+        const variables = variablesResponse?.variables || []
+
+        allScopes.push({
+            name: scope.name,
+            variablesReference: scope.variablesReference,
+            expensive: scope.expensive,
+            source: scope.source,
+            line: scope.line,
+            column: scope.column,
+            endLine: scope.endLine,
+            endColumn: scope.endColumn,
+            variables: await Promise.all(variables.map(async (v: any) => {
+                const variable = summarizeVariable(v)
+                if (depth > 0 && v.variablesReference) {
+                    return {
+                        ...variable,
+                        children: await getExpandedVariables(
+                            session,
+                            v.variablesReference,
+                            depth - 1,
+                            maxChildren
+                        )
+                    }
+                }
+                return variable
+            }))
+        })
+    }
+
+    return allScopes
 }
 
 // 브레이크포인트 추가
@@ -693,6 +766,7 @@ export const inspectVariableTool = {
             variableName,
             frameId,
             scopeName,
+            includeRegisters = false,
             depth = DEFAULT_EXPAND_DEPTH,
             maxChildren = DEFAULT_MAX_CHILDREN
         } = args
@@ -721,7 +795,7 @@ export const inspectVariableTool = {
                 if (scopesResponse && scopesResponse.scopes) {
                     // 각 스코프에서 variables 요청
                     for (const scope of scopesResponse.scopes) {
-                        if (scopeName && scope.name !== scopeName) continue
+                        if (!shouldIncludeScope(scope, scopeName, includeRegisters)) continue
 
                         const variablesResponse = await session.customRequest('variables', {
                             variablesReference: scope.variablesReference,
@@ -1253,6 +1327,7 @@ export const getVariablesScopeTool = {
                 frameId,
                 frameIndex = 0,
                 scopeName,
+                includeRegisters = false,
                 depth = DEFAULT_EXPAND_DEPTH,
                 maxChildren = DEFAULT_MAX_CHILDREN
             } = args
@@ -1274,67 +1349,19 @@ export const getVariablesScopeTool = {
                     return asJsonContent({ message: 'No stack frame available', threadId, frameIndex })
                 }
 
-                const scopesResponse = await session.customRequest('scopes', {
-                    frameId: targetFrameId
-                })
-                
-                if (scopesResponse && scopesResponse.scopes) {
-                    const allScopes = []
-                    
-                    for (const scope of scopesResponse.scopes) {
-                        if (scopeName && scope.name !== scopeName) continue
-                        
-                        const variablesResponse = await session.customRequest('variables', {
-                            variablesReference: scope.variablesReference,
-                            count: maxChildren
-                        })
-                        
-                        const scopeInfo = {
-                            name: scope.name,
-                            variablesReference: scope.variablesReference,
-                            expensive: scope.expensive,
-                            source: scope.source,
-                            line: scope.line,
-                            column: scope.column,
-                            endLine: scope.endLine,
-                            endColumn: scope.endColumn,
-                            variables: variablesResponse && variablesResponse.variables ? 
-                                await Promise.all(variablesResponse.variables.map(async (v: any) => {
-                                    const variable = summarizeVariable(v)
-                                    if (depth > 0 && v.variablesReference) {
-                                        return {
-                                            ...variable,
-                                            children: await getExpandedVariables(
-                                                session,
-                                                v.variablesReference,
-                                                depth - 1,
-                                                maxChildren
-                                            )
-                                        }
-                                    }
-                                    return variable
-                                })) : []
-                        }
-                        
-                        allScopes.push(scopeInfo)
-                    }
-                    
-                    const result = {
-                        frameId: targetFrameId,
-                        threadId: resolvedFrame.threadId,
-                        frame: resolvedFrame.frame,
+                return asJsonContent({
+                    frameId: targetFrameId,
+                    threadId: resolvedFrame.threadId,
+                    frame: resolvedFrame.frame,
+                    depth,
+                    maxChildren,
+                    scopes: await getFrameScopes(session, targetFrameId, {
+                        scopeName,
+                        includeRegisters,
                         depth,
-                        maxChildren,
-                        scopes: allScopes
-                    }
-                    
-                    return {
-                        content: [{
-                            type: 'text' as const,
-                            text: JSON.stringify(result, null, 2)
-                        }]
-                    }
-                }
+                        maxChildren
+                    })
+                })
             } catch (error) {
                 console.log('Variables and scopes request failed:', error)
             }
@@ -1354,7 +1381,90 @@ export const getVariablesScopeTool = {
     }
 }
 
-// 7-1. 변수 참조 펼치기 도구
+// 7-1. 콜스택 프레임별 변수 도구
+export const getStackVariablesTool = {
+    name: 'get-stack-variables',
+    config: {
+        title: 'Get Stack Variables',
+        description: 'Retrieve variables for each stack frame in one request',
+        inputSchema: inputSchemas['get-stack-variables']
+    },
+    handler: async (args: any) => {
+        try {
+            const {
+                threadId,
+                startFrame = 0,
+                levels = 20,
+                scopeName,
+                includeRegisters = false,
+                depth = DEFAULT_EXPAND_DEPTH,
+                maxChildren = DEFAULT_MAX_CHILDREN
+            } = args
+            const session = vscode.debug.activeDebugSession
+
+            if (!session) {
+                return asJsonContent({ message: 'No active debug session' })
+            }
+
+            let targetThreadId = threadId || getActiveThreadId()
+            if (!targetThreadId) {
+                const threadsResponse = await session.customRequest('threads')
+                targetThreadId = threadsResponse?.threads?.[0]?.id
+            }
+
+            if (!targetThreadId) {
+                return asJsonContent({ message: 'No thread available' })
+            }
+
+            const response = await session.customRequest('stackTrace', {
+                threadId: targetThreadId,
+                startFrame,
+                levels
+            })
+            const frames = response?.stackFrames || []
+
+            return asJsonContent({
+                threadId: targetThreadId,
+                startFrame,
+                levels,
+                totalFrames: response?.totalFrames,
+                depth,
+                maxChildren,
+                frames: await Promise.all(frames.map(async (frame: any, offset: number) => ({
+                    index: startFrame + offset,
+                    id: frame.id,
+                    name: frame.name,
+                    source: frame.source ? {
+                        name: frame.source.name,
+                        path: frame.source.path,
+                        sourceReference: frame.source.sourceReference
+                    } : null,
+                    line: frame.line,
+                    column: frame.column,
+                    endLine: frame.endLine,
+                    endColumn: frame.endColumn,
+                    canRestart: frame.canRestart,
+                    instructionPointerReference: frame.instructionPointerReference,
+                    moduleId: frame.moduleId,
+                    presentationHint: frame.presentationHint,
+                    scopes: await getFrameScopes(session, frame.id, {
+                        scopeName,
+                        includeRegisters,
+                        depth,
+                        maxChildren
+                    })
+                })))
+            })
+        } catch (error: any) {
+            return {
+                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                isError: true
+            }
+        }
+    }
+}
+
+// 7-2. 변수 참조 펼치기 도구
 export const expandVariableTool = {
     name: 'expand-variable',
     config: {
@@ -1688,6 +1798,7 @@ export const allTools = [
     getActiveStackItemTool,
     getCallStackTool,
     getVariablesScopeTool,
+    getStackVariablesTool,
     expandVariableTool,
     getThreadListTool,
     getExceptionInfoTool,

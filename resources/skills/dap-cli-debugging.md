@@ -96,9 +96,10 @@ node "%USERPROFILE%\.vscode\extensions\uhd.mcp-debug-tools-*\out\cli.js" <comman
 |------|--------|-------------|
 | `get-call-stack` | `threadId?`, `startFrame?`, `levels?` | Get call stack frames |
 | `get-active-stack-item` | — | Get the currently active stack frame |
-| `get-variables-scope` | `threadId?`, `frameId?`, `frameIndex?`, `scopeName?`, `depth?`, `maxChildren?` | Get variables for the active or specified frame, optionally expanded |
+| `get-variables-scope` | `threadId?`, `frameId?`, `frameIndex?`, `scopeName?`, `includeRegisters?`, `depth?`, `maxChildren?` | Get variables for the active or specified frame, optionally expanded |
+| `get-stack-variables` | `threadId?`, `startFrame?`, `levels?`, `scopeName?`, `includeRegisters?`, `depth?`, `maxChildren?` | Get stack frames and variables for each frame in one request |
 | `expand-variable` | `variablesReference`, `depth?`, `maxChildren?` | Expand a DAP variable reference, optionally several levels deep |
-| `inspect-variable` | `variableName`, `frameId?`, `scopeName?`, `depth?`, `maxChildren?` | Get detailed info about a variable, optionally expanded |
+| `inspect-variable` | `variableName`, `frameId?`, `scopeName?`, `includeRegisters?`, `depth?`, `maxChildren?` | Get detailed info about a variable, optionally expanded |
 | `evaluate-expression` | `expression`, `frameId?`, `context?` | Evaluate an expression in debug context |
 | `get-thread-list` | — | List all threads |
 | `get-exception-info` | `limit?`, `includeStackTrace?` | Get recent exception details |
@@ -124,6 +125,7 @@ npx mcp-debug-tools call start-debug '{"config": "Launch Program"}'
 npx mcp-debug-tools call step-over
 npx mcp-debug-tools call get-variables-scope
 npx mcp-debug-tools call get-variables-scope '{"frameIndex": 1, "depth": 2, "maxChildren": 50}'
+npx mcp-debug-tools call get-stack-variables '{"levels": 8, "depth": 1, "maxChildren": 50}'
 npx mcp-debug-tools call expand-variable '{"variablesReference": 42, "depth": 2}'
 npx mcp-debug-tools call inspect-variable '{"variableName": "result"}'
 
@@ -131,7 +133,8 @@ npx mcp-debug-tools call inspect-variable '{"variableName": "result"}'
 npx mcp-debug-tools call evaluate-expression '{"expression": "arr.length"}'
 
 # Read resources directly
-npx mcp-debug-tools read "dap://log"
+npx mcp-debug-tools read "dap-log://current"
+npx mcp-debug-tools read "debug://active-session"
 ```
 
 ## Standard Debugging Workflow
@@ -144,6 +147,10 @@ npx mcp-debug-tools read "dap://log"
 6. **Inspect Details** → `inspect-variable`, `expand-variable`, or `evaluate-expression`
 7. **Step Through** → `step-over` / `step-into` / `step-out`, repeat 5-6
 8. **Fix Code** → Edit source, then restart debugger to verify
+
+## C++ Notes
+
+For C++ sessions, register scopes are hidden by default to keep variable output readable. Pass `{"includeRegisters": true}` when register inspection is needed. Prefer bounded expansion such as `{"depth": 2, "maxChildren": 50}` for STL containers.
 
 ## Clean Workspace Behavior
 
