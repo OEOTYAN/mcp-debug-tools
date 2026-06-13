@@ -2,15 +2,269 @@ import * as vscode from 'vscode'
 import { z } from 'zod'
 import * as path from 'path'
 import * as fs from 'fs'
-import * as os from 'os'
 import { getWorkspaceRoot, getRelativePath } from './utils/path'
 import { inputSchemas } from './tools-parameters'
 import { parseJsonWithComments } from './utils/json'
 import { state } from './state'
-import { WorkspaceConfig } from './config-manager'
-import { RegistryEntry } from './registry-manager'
+import { t } from './i18n'
+import {
+    RegistryEntry,
+    getRegistryPath,
+    getWorkspaceConfigPath,
+    isEntryAlive,
+    loadActiveInstances
+} from './discovery'
 
-// 브레이크포인트 추가
+const DEFAULT_MAX_CHILDREN = 100
+const DEFAULT_EXPAND_DEPTH = 0
+const REGISTER_SCOPE_NAMES = new Set(['Registers', 'CPU Registers'])
+
+function asJsonContent(value: unknown) {
+    return {
+        content: [{
+            type: 'text' as const,
+            text: JSON.stringify(value, null, 2)
+        }]
+    }
+}
+
+function asTextContent(text: string, isError = false) {
+    return {
+        content: [{
+            type: 'text' as const,
+            text
+        }],
+        ...(isError ? { isError: true } : {})
+    }
+}
+
+function asErrorContent(error: any) {
+    return asTextContent(t('tools.error', { error: error?.message || error }), true)
+}
+
+function getActiveThreadId(): number | undefined {
+    const activeStackItem = vscode.debug.activeStackItem
+    return activeStackItem ? activeStackItem.threadId : undefined
+}
+
+function getActiveFrameId(): number | undefined {
+    const activeStackItem = vscode.debug.activeStackItem
+    return activeStackItem && 'frameId' in activeStackItem ? (activeStackItem as any).frameId : undefined
+}
+
+async function resolveFrameId(
+    session: vscode.DebugSession,
+    args: { threadId?: number, frameId?: number, frameIndex?: number }
+): Promise<{ frameId?: number, threadId?: number, frame?: any }> {
+    const activeFrameId = getActiveFrameId()
+    const activeThreadId = getActiveThreadId()
+
+    if (args.frameId !== undefined) {
+        return {
+            frameId: args.frameId,
+            threadId: args.threadId || activeThreadId
+        }
+    }
+
+    if (args.frameIndex === undefined && activeFrameId !== undefined && (!args.threadId || args.threadId === activeThreadId)) {
+        return {
+            frameId: activeFrameId,
+            threadId: activeThreadId
+        }
+    }
+
+    const threadId = args.threadId || activeThreadId
+    if (!threadId) {
+        return { frameId: activeFrameId, threadId }
+    }
+
+    const frameIndex = args.frameIndex || 0
+    const response = await session.customRequest('stackTrace', {
+        threadId,
+        startFrame: frameIndex,
+        levels: 1
+    })
+    const frame = response?.stackFrames?.[0]
+
+    return {
+        frameId: frame?.id,
+        threadId,
+        frame
+    }
+}
+
+function summarizeVariable(variable: any) {
+    return {
+        name: variable.name,
+        value: variable.value,
+        type: variable.type,
+        variablesReference: variable.variablesReference,
+        namedVariables: variable.namedVariables,
+        indexedVariables: variable.indexedVariables,
+        memoryReference: variable.memoryReference,
+        presentationHint: variable.presentationHint,
+        evaluateName: variable.evaluateName
+    }
+}
+
+function shouldIncludeScope(scope: any, scopeName?: string, includeRegisters = false): boolean {
+    if (scopeName && scope.name !== scopeName) {
+        return false
+    }
+
+    if (!includeRegisters && REGISTER_SCOPE_NAMES.has(scope.name)) {
+        return false
+    }
+
+    return true
+}
+
+async function getExpandedVariables(
+    session: vscode.DebugSession,
+    variablesReference: number,
+    depth = DEFAULT_EXPAND_DEPTH,
+    maxChildren = DEFAULT_MAX_CHILDREN
+): Promise<any[]> {
+    const response = await session.customRequest('variables', {
+        variablesReference,
+        count: maxChildren
+    })
+    const variables = response?.variables || []
+
+    return Promise.all(variables.map(async (variable: any) => {
+        const summarized = summarizeVariable(variable)
+        if (depth > 0 && variable.variablesReference) {
+            return {
+                ...summarized,
+                children: await getExpandedVariables(
+                    session,
+                    variable.variablesReference,
+                    depth - 1,
+                    maxChildren
+                )
+            }
+        }
+        return summarized
+    }))
+}
+
+async function getFrameScopes(
+    session: vscode.DebugSession,
+    frameId: number,
+    options: {
+        scopeName?: string,
+        includeRegisters?: boolean,
+        depth?: number,
+        maxChildren?: number
+    } = {}
+): Promise<any[]> {
+    const {
+        scopeName,
+        includeRegisters = false,
+        depth = DEFAULT_EXPAND_DEPTH,
+        maxChildren = DEFAULT_MAX_CHILDREN
+    } = options
+
+    const scopesResponse = await session.customRequest('scopes', { frameId })
+    const scopes = scopesResponse?.scopes || []
+    const allScopes = []
+
+    for (const scope of scopes) {
+        if (!shouldIncludeScope(scope, scopeName, includeRegisters)) continue
+
+        const variablesResponse = await session.customRequest('variables', {
+            variablesReference: scope.variablesReference,
+            count: maxChildren
+        })
+        const variables = variablesResponse?.variables || []
+
+        allScopes.push({
+            name: scope.name,
+            variablesReference: scope.variablesReference,
+            expensive: scope.expensive,
+            source: scope.source,
+            line: scope.line,
+            column: scope.column,
+            endLine: scope.endLine,
+            endColumn: scope.endColumn,
+            variables: await Promise.all(variables.map(async (v: any) => {
+                const variable = summarizeVariable(v)
+                if (depth > 0 && v.variablesReference) {
+                    return {
+                        ...variable,
+                        children: await getExpandedVariables(
+                            session,
+                            v.variablesReference,
+                            depth - 1,
+                            maxChildren
+                        )
+                    }
+                }
+                return variable
+            }))
+        })
+    }
+
+    return allScopes
+}
+
+function summarizeActiveStackItem() {
+    const activeStackItem = vscode.debug.activeStackItem
+    if (!activeStackItem) {
+        return undefined
+    }
+
+    const result: any = {
+        type: 'frameId' in activeStackItem ? 'stackFrame' : 'thread',
+        sessionId: activeStackItem.session.id,
+        sessionName: activeStackItem.session.name,
+        sessionType: activeStackItem.session.type,
+        threadId: activeStackItem.threadId
+    }
+
+    if ('frameId' in activeStackItem) {
+        result.frameId = (activeStackItem as any).frameId
+    }
+
+    return result
+}
+
+function sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+async function revealFrameSource(frame: any): Promise<any> {
+    if (!frame?.source?.path || frame.line === undefined || frame.line <= 0) {
+        return {
+            revealed: false,
+            reason: 'Frame has no file source location'
+        }
+    }
+
+    const uri = vscode.Uri.file(frame.source.path)
+    const position = new vscode.Position(Math.max(frame.line - 1, 0), Math.max((frame.column || 1) - 1, 0))
+    const document = await vscode.workspace.openTextDocument(uri)
+    const editor = await vscode.window.showTextDocument(document, {
+        preview: false,
+        preserveFocus: false,
+        selection: new vscode.Range(position, position)
+    })
+    editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenterIfOutsideViewport)
+
+    return {
+        revealed: true,
+        file: uri.fsPath,
+        line: frame.line,
+        column: frame.column,
+        activeEditor: {
+            file: vscode.window.activeTextEditor?.document.uri.fsPath,
+            line: vscode.window.activeTextEditor ? vscode.window.activeTextEditor.selection.active.line + 1 : undefined,
+            column: vscode.window.activeTextEditor ? vscode.window.activeTextEditor.selection.active.character + 1 : undefined
+        }
+    }
+}
+
+// Add a breakpoint
 export const addBreakpointTool = {
     name: 'add-breakpoint',
     config: {
@@ -22,18 +276,18 @@ export const addBreakpointTool = {
         const { file, line, condition, hitCondition, logMessage } = args
         const tmpLogMessage = null
         
-        console.log(`[DEBUG] addBreakpoint 시작: ${file}:${line}`)
+        console.log(`[DEBUG] addBreakpoint start: ${file}:${line}`)
         const startTime = Date.now()
         
         try {
             const uri = vscode.Uri.file(path.join(getWorkspaceRoot(), file))
             const location = new vscode.Location(uri, new vscode.Position(line - 1, 0))
             
-            console.log(`[DEBUG] 브레이크포인트 생성 중...`)
-            // 브레이크포인트 생성
+            console.log(`[DEBUG] Creating breakpoint...`)
+            // Create breakpoint
             const breakpoint = new vscode.SourceBreakpoint(location)
             
-            // 조건부 설정 (옵셔널)
+            // Optional condition settings
             if (condition) {
                 (breakpoint as any).condition = condition
             }
@@ -46,9 +300,9 @@ export const addBreakpointTool = {
             //     (breakpoint as any).logMessage = logMessage
             // }
             
-            console.log(`[DEBUG] VSCode API 호출 전: vscode.debug.addBreakpoints`)
+            console.log(`[DEBUG] Before VS Code API call: vscode.debug.addBreakpoints`)
             
-            // 타임아웃 설정 (10초)
+            // Timeout guard (10 seconds)
             const addBreakpointPromise = vscode.debug.addBreakpoints([breakpoint])
             const timeoutPromise = new Promise((_, reject) => {
                 setTimeout(() => {
@@ -59,7 +313,7 @@ export const addBreakpointTool = {
             await Promise.race([addBreakpointPromise, timeoutPromise])
             
             const duration = Date.now() - startTime
-            console.log(`[DEBUG] 브레이크포인트 추가 완료 (${duration}ms)`)
+            console.log(`[DEBUG] Breakpoint added (${duration}ms)`)
             
             const result = {
                 file: file,
@@ -68,8 +322,8 @@ export const addBreakpointTool = {
                 hitCondition: hitCondition || null,
                 logMessage: tmpLogMessage || null,
                 message: condition || hitCondition || tmpLogMessage ? 
-                    'Conditional breakpoint added successfully' : 
-                    'Breakpoint added successfully'
+                    t('tools.conditionalBreakpointAdded') :
+                    t('tools.breakpointAdded')
             }
             
             return { 
@@ -79,15 +333,12 @@ export const addBreakpointTool = {
                 }] 
             }
         } catch (error: any) {
-            return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
-                isError: true 
-            }
+            return asErrorContent(error)
         }
     }
 }
 
-// 다수 브레이크포인트 추가
+// Add multiple breakpoints
 export const addBreakpointsTool = {
     name: 'add-breakpoints',
     config: {
@@ -102,7 +353,7 @@ export const addBreakpointsTool = {
             const results: any[] = []
             const BATCH_SIZE = 5
             
-            // 배치 단위로 처리
+            // Process in batches
             for (let i = 0; i < breakpoints.length; i += BATCH_SIZE) {
                 const batch = breakpoints.slice(i, i + BATCH_SIZE)
                 const batchBreakpoints: vscode.SourceBreakpoint[] = []
@@ -112,10 +363,10 @@ export const addBreakpointsTool = {
                     const uri = vscode.Uri.file(path.join(getWorkspaceRoot(), file))
                     const location = new vscode.Location(uri, new vscode.Position(line - 1, 0))
                     
-                    // 브레이크포인트 생성
+                    // Create breakpoint
                     const breakpoint = new vscode.SourceBreakpoint(location)
                     
-                    // 조건부 설정 (옵셔널)
+                    // Optional condition settings
                     if (condition) {
                         (breakpoint as any).condition = condition
                     }
@@ -132,15 +383,15 @@ export const addBreakpointsTool = {
                         hitCondition: hitCondition || null,
                         logMessage: null,
                         message: condition || hitCondition ? 
-                            'Conditional breakpoint added successfully' : 
-                            'Breakpoint added successfully'
+                            t('tools.conditionalBreakpointAdded') :
+                            t('tools.breakpointAdded')
                     })
                 }
                 
-                // 각 배치를 개별적으로 처리
+                // Process each batch separately
                 await vscode.debug.addBreakpoints(batchBreakpoints)
                 
-                // 배치 사이에 짧은 지연 추가
+                // Add a short delay between batches
                 if (i + BATCH_SIZE < breakpoints.length) {
                     await new Promise(resolve => setTimeout(resolve, 100))
                 }
@@ -156,15 +407,12 @@ export const addBreakpointsTool = {
                 }]
             }
         } catch (error: any) {
-            return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
-                isError: true 
-            }
+            return asErrorContent(error)
         }
     }
 }
 
-// 브레이크포인트 제거
+// Remove a breakpoint
 export const removeBreakpointTool = {
     name: 'remove-breakpoint',
     config: {
@@ -184,19 +432,16 @@ export const removeBreakpointTool = {
             
             if (breakpoints.length > 0) {
                 vscode.debug.removeBreakpoints(breakpoints)
-                return { content: [{ type: 'text' as const, text: `Breakpoint removed from ${file}:${line}` }] }
+                return asTextContent(t('tools.breakpointRemoved', { file, line }))
             }
-            return { content: [{ type: 'text' as const, text: `No breakpoint found at ${file}:${line}` }] }
+            return asTextContent(t('tools.breakpointNotFound', { file, line }))
         } catch (error: any) {
-            return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
-                isError: true 
-            }
+            return asErrorContent(error)
         }
     }
 }
 
-// 모든 브레이크포인트 제거
+// Clear all breakpoints
 export const clearBreakpointsTool = {
     name: 'clear-breakpoints',
     config: {
@@ -206,7 +451,7 @@ export const clearBreakpointsTool = {
     },
     handler: async (args: any) => {
         const startTime = Date.now()
-        console.error(`🔧 [clear-breakpoints] 핸들러 시작`)
+        console.error(`[clear-breakpoints] Handler start`)
         
         const { files } = args as { files?: string[] }
         
@@ -214,7 +459,7 @@ export const clearBreakpointsTool = {
             let breakpoints: vscode.Breakpoint[]
             
             if (files && files.length > 0) {
-                // 특정 파일들의 브레이크포인트만 제거
+                // Remove only breakpoints in the specified files
                 const uris = files.map(file => vscode.Uri.file(path.join(getWorkspaceRoot(), file)))
                 breakpoints = vscode.debug.breakpoints.filter(bp =>
                     bp instanceof vscode.SourceBreakpoint &&
@@ -222,44 +467,41 @@ export const clearBreakpointsTool = {
                 )
                 
                 if (breakpoints.length > 0) {
-                    console.error(`⏳ [clear-breakpoints] VSCode API 호출 전`)
+                    console.error(`[clear-breakpoints] Before VS Code API call`)
                     vscode.debug.removeBreakpoints(breakpoints)
                     const elapsed = Date.now() - startTime
-                    console.error(`✅ [clear-breakpoints] VSCode API 호출 완료 (${elapsed}ms)`)
+                    console.error(`[clear-breakpoints] VS Code API call complete (${elapsed}ms)`)
                     
-                    const result = { content: [{ type: 'text' as const, text: `Cleared ${breakpoints.length} breakpoint(s) from ${files.length} file(s): ${files.join(', ')}` }] }
-                    console.error(`📤 [clear-breakpoints] 결과 반환`)
+                    const result = asTextContent(t('tools.breakpointsClearedFromFiles', { count: breakpoints.length, files: files.length, fileList: files.join(', ') }))
+                    console.error(`[clear-breakpoints] Returning result`)
                     return result
                 }
-                return { content: [{ type: 'text' as const, text: `No breakpoints found in specified files: ${files.join(', ')}` }] }
+                return asTextContent(t('tools.noBreakpointsInFiles', { files: files.join(', ') }))
             } else {
-                // 모든 브레이크포인트 제거
+                // Clear all breakpoints
                 breakpoints = vscode.debug.breakpoints.filter(bp => bp instanceof vscode.SourceBreakpoint)
                 
                 if (breakpoints.length > 0) {
-                    console.error(`⏳ [clear-breakpoints] VSCode API 호출 전`)
+                    console.error(`[clear-breakpoints] Before VS Code API call`)
                     vscode.debug.removeBreakpoints(breakpoints)
                     const elapsed = Date.now() - startTime
-                    console.error(`✅ [clear-breakpoints] VSCode API 호출 완료 (${elapsed}ms)`)
+                    console.error(`[clear-breakpoints] VS Code API call complete (${elapsed}ms)`)
                     
-                    const result = { content: [{ type: 'text' as const, text: `Cleared ${breakpoints.length} breakpoint(s) from all files` }] }
-                    console.error(`📤 [clear-breakpoints] 결과 반환`)
+                    const result = asTextContent(t('tools.breakpointsClearedAll', { count: breakpoints.length }))
+                    console.error(`[clear-breakpoints] Returning result`)
                     return result
                 }
-                return { content: [{ type: 'text' as const, text: 'No breakpoints to clear' }] }
+                return asTextContent(t('tools.noBreakpointsToClear'))
             }
         } catch (error: any) {
             const elapsed = Date.now() - startTime
-            console.error(`❌ [clear-breakpoints] 오류 (${elapsed}ms):`, error)
-            return {
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
-                isError: true
-            }
+            console.error(`[clear-breakpoints] Error (${elapsed}ms):`, error)
+            return asErrorContent(error)
         }
     }
 }
 
-// 모든 브레이크포인트 목록
+// List all breakpoints
 export const listBreakpointsTool = {
     name: 'list-breakpoints',
     config: {
@@ -283,14 +525,14 @@ export const listBreakpointsTool = {
             return { content: [{ type: 'text' as const, text: JSON.stringify(breakpoints, null, 2) }] }
         } catch (error: any) {
             return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true 
             }
         }
     }
 }
 
-// 디버그 시작
+// Start debugging
 export const startDebugTool = {
     name: 'start-debug',
     config: {
@@ -303,21 +545,18 @@ export const startDebugTool = {
         try {
             const folder = vscode.workspace.workspaceFolders?.[0]
             if (!folder) {
-                return { content: [{ type: 'text' as const, text: 'No workspace folder open' }], isError: true }
+                return asTextContent(t('tools.noWorkspaceFolder'), true)
             }
             
             const success = await vscode.debug.startDebugging(folder, config)
-            return { content: [{ type: 'text' as const, text: success ? `Debug session '${config}' started` : 'Failed to start debug session' }] }
+            return asTextContent(success ? t('tools.debugStarted', { config }) : t('tools.debugStartFailed'))
         } catch (error: any) {
-            return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
-                isError: true 
-            }
+            return asErrorContent(error)
         }
     }
 }
 
-// 디버그 중지
+// Stop debugging
 export const stopDebugTool = {
     name: 'stop-debug',
     config: {
@@ -329,21 +568,18 @@ export const stopDebugTool = {
         try {
             const session = vscode.debug.activeDebugSession
             if (!session) {
-                return { content: [{ type: 'text' as const, text: 'No active debug session' }] }
+                return asTextContent(t('tools.noActiveDebugSession'))
             }
             
             await vscode.debug.stopDebugging(session)
-            return { content: [{ type: 'text' as const, text: 'Debug session stopped' }] }
+            return asTextContent(t('tools.debugStopped'))
         } catch (error: any) {
-            return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
-                isError: true 
-            }
+            return asErrorContent(error)
         }
     }
 }
 
-// 실행 계속
+// Continue execution
 export const continueTool = {
     name: 'continue',
     config: {
@@ -354,21 +590,18 @@ export const continueTool = {
     handler: async () => {
         try {
             if (!vscode.debug.activeDebugSession) {
-                return { content: [{ type: 'text' as const, text: 'No active debug session' }] }
+                return asTextContent(t('tools.noActiveDebugSession'))
             }
             
             await vscode.commands.executeCommand('workbench.action.debug.continue')
-            return { content: [{ type: 'text' as const, text: 'Execution continued' }] }
+            return asTextContent(t('tools.executionContinued'))
         } catch (error: any) {
-            return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
-                isError: true 
-            }
+            return asErrorContent(error)
         }
     }
 }
 
-// 한 줄 실행 (함수 건너뛰기)
+// Step over
 export const stepOverTool = {
     name: 'step-over',
     config: {
@@ -379,21 +612,18 @@ export const stepOverTool = {
     handler: async () => {
         try {
             if (!vscode.debug.activeDebugSession) {
-                return { content: [{ type: 'text' as const, text: 'No active debug session' }] }
+                return asTextContent(t('tools.noActiveDebugSession'))
             }
             
             await vscode.commands.executeCommand('workbench.action.debug.stepOver')
-            return { content: [{ type: 'text' as const, text: 'Stepped over' }] }
+            return asTextContent(t('tools.steppedOver'))
         } catch (error: any) {
-            return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
-                isError: true 
-            }
+            return asErrorContent(error)
         }
     }
 }
 
-// 함수 안으로 들어가기
+// Step into
 export const stepIntoTool = {
     name: 'step-into',
     config: {
@@ -404,21 +634,18 @@ export const stepIntoTool = {
     handler: async () => {
         try {
             if (!vscode.debug.activeDebugSession) {
-                return { content: [{ type: 'text' as const, text: 'No active debug session' }] }
+                return asTextContent(t('tools.noActiveDebugSession'))
             }
             
             await vscode.commands.executeCommand('workbench.action.debug.stepInto')
-            return { content: [{ type: 'text' as const, text: 'Stepped into' }] }
+            return asTextContent(t('tools.steppedInto'))
         } catch (error: any) {
-            return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
-                isError: true 
-            }
+            return asErrorContent(error)
         }
     }
 }
 
-// 함수 밖으로 나가기
+// Step out
 export const stepOutTool = {
     name: 'step-out',
     config: {
@@ -429,21 +656,18 @@ export const stepOutTool = {
     handler: async () => {
         try {
             if (!vscode.debug.activeDebugSession) {
-                return { content: [{ type: 'text' as const, text: 'No active debug session' }] }
+                return asTextContent(t('tools.noActiveDebugSession'))
             }
             
             await vscode.commands.executeCommand('workbench.action.debug.stepOut')
-            return { content: [{ type: 'text' as const, text: 'Stepped out' }] }
+            return asTextContent(t('tools.steppedOut'))
         } catch (error: any) {
-            return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
-                isError: true 
-            }
+            return asErrorContent(error)
         }
     }
 }
 
-// 일시 중지
+// Pause execution
 export const pauseTool = {
     name: 'pause',
     config: {
@@ -454,21 +678,21 @@ export const pauseTool = {
     handler: async () => {
         try {
             if (!vscode.debug.activeDebugSession) {
-                return { content: [{ type: 'text' as const, text: 'No active debug session' }] }
+                return asTextContent(t('tools.noActiveDebugSession'))
             }
             
             await vscode.commands.executeCommand('workbench.action.debug.pause')
-            return { content: [{ type: 'text' as const, text: 'Execution paused' }] }
+            return asTextContent(t('tools.executionPaused'))
         } catch (error: any) {
             return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true 
             }
         }
     }
 }
 
-// 디버그 상태 가져오기
+// Get debug state
 export const getDebugStateTool = {
     name: 'get-debug-state',
     config: {
@@ -501,14 +725,14 @@ export const getDebugStateTool = {
             return { content: [{ type: 'text' as const, text: JSON.stringify(state, null, 2) }] }
         } catch (error: any) {
             return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true 
             }
         }
     }
 }
 
-// 표현식 평가
+// Evaluate expression
 export const evaluateExpressionTool = {
     name: 'evaluate-expression',
     config: {
@@ -517,37 +741,27 @@ export const evaluateExpressionTool = {
         inputSchema: inputSchemas['evaluate-expression']
     },
     handler: async (args: any) => {
-        const { expression } = args
+        const { expression, frameId, context = 'repl' } = args
         
         try {
-            // 디버그 세션 확인
+            // Check debug session
             const session = vscode.debug.activeDebugSession
             if (!session) {
                 return { 
-                    content: [{ type: 'text' as const, text: 'No active debug session' }],
-                    isError: true 
-                }
-            }
-            
-            // 현재 활성 스택 프레임 확인
-            const activeStackItem = vscode.debug.activeStackItem
-            if (!activeStackItem) {
-                return { 
-                    content: [{ type: 'text' as const, text: 'No active stack frame' }],
+                    content: [{ type: 'text' as const, text: t('tools.noActiveDebugSession') }],
                     isError: true 
                 }
             }
             
             console.log('Debug session:', session.name, session.type)
-            console.log('Active stack item:', activeStackItem)
             console.log('Expression to evaluate:', expression)
             
-            // DebugSession의 customRequest를 사용하여 evaluate 요청
+            // Use DebugSession.customRequest for evaluate.
             try {
                 const requestBody = {
                     expression: expression,
-                    context: 'repl',
-                    frameId: 'frameId' in activeStackItem ? (activeStackItem as any).frameId : undefined
+                    context,
+                    frameId: frameId || getActiveFrameId()
                 }
                 
                 console.log('Evaluate request body:', requestBody)
@@ -557,20 +771,18 @@ export const evaluateExpressionTool = {
                 console.log('Evaluate response:', response)
                 
                 if (response && response.result !== undefined) {
-                    const result = typeof response.result === 'string' ? response.result : JSON.stringify(response.result)
-                    return { 
-                        content: [{ 
-                            type: 'text' as const, 
-                            text: `Expression: ${expression}\nResult: ${result}` 
-                        }] 
-                    }
+                    return asJsonContent({
+                        expression,
+                        frameId: requestBody.frameId,
+                        result: response.result,
+                        type: response.type,
+                        variablesReference: response.variablesReference,
+                        namedVariables: response.namedVariables,
+                        indexedVariables: response.indexedVariables,
+                        memoryReference: response.memoryReference
+                    })
                 } else {
-                    return { 
-                        content: [{ 
-                            type: 'text' as const, 
-                            text: `Expression: ${expression}\nResponse: ${JSON.stringify(response)}` 
-                        }] 
-                    }
+                    return asJsonContent({ expression, frameId: requestBody.frameId, response })
                 }
             } catch (evaluateError) {
                 console.log('Evaluate request failed:', evaluateError)
@@ -584,14 +796,14 @@ export const evaluateExpressionTool = {
             }
         } catch (error: any) {
             return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true 
             }
         }
     }
 }
 
-// 특정 변수 검사
+// Inspect a specific variable
 export const inspectVariableTool = {
     name: 'inspect-variable',
     config: {
@@ -600,58 +812,61 @@ export const inspectVariableTool = {
         inputSchema: inputSchemas['inspect-variable']
     },
     handler: async (args: any) => {
-        const { variableName } = args
+        const {
+            variableName,
+            frameId,
+            scopeName,
+            includeRegisters = false,
+            depth = DEFAULT_EXPAND_DEPTH,
+            maxChildren = DEFAULT_MAX_CHILDREN
+        } = args
         
         try {
-            // 디버그 세션 확인
+            // Check debug session
             const session = vscode.debug.activeDebugSession
             if (!session) {
                 return { 
-                    content: [{ type: 'text' as const, text: 'No active debug session' }],
+                    content: [{ type: 'text' as const, text: t('tools.noActiveDebugSession') }],
                     isError: true 
                 }
             }
             
-            // 현재 활성 스택 프레임 확인
-            const activeStackItem = vscode.debug.activeStackItem
-            if (!activeStackItem) {
-                return { 
-                    content: [{ type: 'text' as const, text: 'No active stack frame' }],
-                    isError: true 
-                }
-            }
-            
-            // 먼저 scopes 요청으로 변수 스코프 확인
+            // First request scopes to inspect variable scopes.
             try {
+                const resolvedFrame = await resolveFrameId(session, { frameId })
+                if (resolvedFrame.frameId === undefined) {
+                    return asJsonContent({ message: 'No stack frame available' })
+                }
+
                 const scopesResponse = await session.customRequest('scopes', {
-                    frameId: 'frameId' in activeStackItem ? (activeStackItem as any).frameId : undefined
+                    frameId: resolvedFrame.frameId
                 })
                 
                 if (scopesResponse && scopesResponse.scopes) {
-                    // 각 스코프에서 variables 요청
+                    // Request variables for each scope.
                     for (const scope of scopesResponse.scopes) {
+                        if (!shouldIncludeScope(scope, scopeName, includeRegisters)) continue
+
                         const variablesResponse = await session.customRequest('variables', {
-                            variablesReference: scope.variablesReference
+                            variablesReference: scope.variablesReference,
+                            count: maxChildren
                         })
                         
                         if (variablesResponse && variablesResponse.variables) {
-                            // 변수명으로 검색
+                            // Search by variable name
                             const variable = variablesResponse.variables.find((v: any) => v.name === variableName)
                             if (variable) {
                                 const result = {
-                                    name: variable.name,
-                                    value: variable.value,
-                                    type: variable.type,
-                                    variablesReference: variable.variablesReference,
-                                    scope: scope.name
+                                    ...summarizeVariable(variable),
+                                    frameId: resolvedFrame.frameId,
+                                    threadId: resolvedFrame.threadId,
+                                    scope: scope.name,
+                                    children: depth > 0 && variable.variablesReference ?
+                                        await getExpandedVariables(session, variable.variablesReference, depth - 1, maxChildren) :
+                                        undefined
                                 }
                                 
-                                return { 
-                                    content: [{ 
-                                        type: 'text' as const, 
-                                        text: `Variable: ${variableName}\nDetails: ${JSON.stringify(result, null, 2)}` 
-                                    }] 
-                                }
+                                return asJsonContent(result)
                             }
                         }
                     }
@@ -660,24 +875,18 @@ export const inspectVariableTool = {
                 console.log('Variable inspection failed:', error)
             }
             
-            // 변수를 찾지 못한 경우
-            return { 
-                content: [{ 
-                    type: 'text' as const, 
-                    text: `Variable "${variableName}" not found in current scope` 
-                }],
-                isError: true 
-            }
+            // Variable not found
+            return asJsonContent({ message: `Variable "${variableName}" not found in scope`, frameId, scopeName })
         } catch (error: any) {
             return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true 
             }
         }
     }
 }
 
-// 디버그 구성 목록 조회
+// List debug configurations
 export const listDebugConfigsTool = {
     name: 'list-debug-configs',
     config: {
@@ -690,23 +899,23 @@ export const listDebugConfigsTool = {
             const workspaceFolder = vscode.workspace.workspaceFolders?.[0]
             if (!workspaceFolder) {
                 return { 
-                    content: [{ type: 'text' as const, text: 'No workspace folder open' }],
+                    content: [{ type: 'text' as const, text: t('tools.noWorkspaceFolder') }],
                     isError: true 
                 }
             }
             
-            // launch.json 파일 읽기
+            // Read launch.json
             const launchJsonUri = vscode.Uri.joinPath(workspaceFolder.uri, '.vscode', 'launch.json')
             
             try {
                 const launchJsonContent = await vscode.workspace.fs.readFile(launchJsonUri)
                 const contentString = launchJsonContent.toString()
                 
-                // 디버깅을 위한 내용 출력
+                // Print content details for debugging
                 console.log('Launch.json content length:', contentString.length)
                 console.log('Launch.json first 100 chars:', contentString.substring(0, 100))
                 
-                // JSON 파싱 시도 (주석 제거 후)
+                // Parse JSON after removing comments
                 let launchJson
                 try {
                     launchJson = parseJsonWithComments(contentString)
@@ -774,14 +983,14 @@ export const listDebugConfigsTool = {
             }
         } catch (error: any) {
             return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true 
             }
         }
     }
 }
 
-// 디버그 구성 선택
+// Select debug configuration
 export const selectDebugConfigTool = {
     name: 'select-debug-config',
     config: {
@@ -796,12 +1005,12 @@ export const selectDebugConfigTool = {
             const workspaceFolder = vscode.workspace.workspaceFolders?.[0]
             if (!workspaceFolder) {
                 return { 
-                    content: [{ type: 'text' as const, text: 'No workspace folder open' }],
+                    content: [{ type: 'text' as const, text: t('tools.noWorkspaceFolder') }],
                     isError: true 
                 }
             }
             
-            // launch.json 파일 읽기
+            // Read launch.json
             const launchJsonUri = vscode.Uri.joinPath(workspaceFolder.uri, '.vscode', 'launch.json')
             
             try {
@@ -866,16 +1075,16 @@ export const selectDebugConfigTool = {
             }
         } catch (error: any) {
             return { 
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true 
             }
         }
     }
 }
 
-// 새로운 도구들 추가
+// Additional tools
 
-// 1. DAP 로그 도구
+// 1. DAP log tool
 export const getDapLogTool = {
     name: 'get-dap-log',
     config: {
@@ -885,7 +1094,7 @@ export const getDapLogTool = {
     },
     handler: async (args: any) => {
         try {
-            // DAP 메시지 수집이 비활성화됨
+            // DAP message collection is disabled.
             return {
                 content: [{
                     type: 'text' as const,
@@ -897,14 +1106,14 @@ export const getDapLogTool = {
             }
         } catch (error: any) {
             return {
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true
             }
         }
     }
 }
 
-// 2. 브레이크포인트 목록 도구
+// 2. Breakpoint list tool
 export const getBreakpointsTool = {
     name: 'get-breakpoints',
     config: {
@@ -936,14 +1145,14 @@ export const getBreakpointsTool = {
             }
         } catch (error: any) {
             return {
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true
             }
         }
     }
 }
 
-// 3. 활성 세션 도구
+// 3. Active session tool
 export const getActiveSessionTool = {
     name: 'get-active-session',
     config: {
@@ -959,7 +1168,7 @@ export const getActiveSessionTool = {
                 return {
                     content: [{
                         type: 'text' as const,
-                        text: JSON.stringify({ message: 'No active debug session' }, null, 2)
+                        text: JSON.stringify({ message: t('tools.noActiveDebugSession') }, null, 2)
                     }]
                 }
             }
@@ -980,14 +1189,14 @@ export const getActiveSessionTool = {
             }
         } catch (error: any) {
             return {
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true
             }
         }
     }
 }
 
-// 4. 디버그 콘솔 도구
+// 4. Debug console tool
 export const getDebugConsoleTool = {
     name: 'get-debug-console',
     config: {
@@ -999,7 +1208,7 @@ export const getDebugConsoleTool = {
         try {
             const { limit, filter } = args
             
-            // DAP 메시지 수집이 비활성화됨
+            // DAP message collection is disabled.
             return {
                 content: [{
                     type: 'text' as const,
@@ -1008,14 +1217,14 @@ export const getDebugConsoleTool = {
             }
         } catch (error: any) {
             return {
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true
             }
         }
     }
 }
 
-// 5. 활성 스택 아이템 도구
+// 5. Active stack item tool
 export const getActiveStackItemTool = {
     name: 'get-active-stack-item',
     config: {
@@ -1025,9 +1234,8 @@ export const getActiveStackItemTool = {
     },
     handler: async (args: any) => {
         try {
-            const activeStackItem = vscode.debug.activeStackItem
-            
-            if (!activeStackItem) {
+            const itemInfo = summarizeActiveStackItem()
+            if (!itemInfo) {
                 return {
                     content: [{
                         type: 'text' as const,
@@ -1035,21 +1243,7 @@ export const getActiveStackItemTool = {
                     }]
                 }
             }
-            
-            const itemInfo: any = {
-                type: 'frameId' in activeStackItem ? 'stackFrame' : 'thread',
-                sessionId: activeStackItem.session.id,
-                sessionName: activeStackItem.session.name,
-                sessionType: activeStackItem.session.type
-            }
-            
-            if ('frameId' in activeStackItem) {
-                itemInfo.frameId = (activeStackItem as any).frameId
-                itemInfo.threadId = activeStackItem.threadId
-            } else {
-                itemInfo.threadId = activeStackItem.threadId
-            }
-            
+
             return {
                 content: [{
                     type: 'text' as const,
@@ -1058,14 +1252,14 @@ export const getActiveStackItemTool = {
             }
         } catch (error: any) {
             return {
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true
             }
         }
     }
 }
 
-// 6. 콜스택 도구
+// 6. Call stack tool
 export const getCallStackTool = {
     name: 'get-call-stack',
     config: {
@@ -1082,22 +1276,20 @@ export const getCallStackTool = {
                 return {
                     content: [{
                         type: 'text' as const,
-                        text: JSON.stringify({ message: 'No active debug session' }, null, 2)
+                        text: JSON.stringify({ message: t('tools.noActiveDebugSession') }, null, 2)
                     }]
                 }
             }
             
-            const activeStackItem = vscode.debug.activeStackItem
-            if (!activeStackItem) {
-                return {
-                    content: [{
-                        type: 'text' as const,
-                        text: JSON.stringify({ message: 'No active stack frame' }, null, 2)
-                    }]
-                }
+            let targetThreadId = threadId || getActiveThreadId()
+            if (!targetThreadId) {
+                const threadsResponse = await session.customRequest('threads')
+                targetThreadId = threadsResponse?.threads?.[0]?.id
             }
-            
-            const targetThreadId = threadId || activeStackItem.threadId
+
+            if (!targetThreadId) {
+                return asJsonContent({ message: 'No thread available' })
+            }
             
             try {
                 const response = await session.customRequest('stackTrace', {
@@ -1143,19 +1335,202 @@ export const getCallStackTool = {
             return {
                 content: [{
                     type: 'text' as const,
-                    text: JSON.stringify({ message: 'Failed to get call stack' }, null, 2)
+                    text: JSON.stringify({ message: t('resources.callStackFailed') }, null, 2)
                 }]
             }
         } catch (error: any) {
             return {
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true
             }
         }
     }
 }
 
-// 7. 변수/스코프 도구
+// 6-1. Select a call stack frame and sync the UI
+export const selectStackFrameTool = {
+    name: 'select-stack-frame',
+    config: {
+        title: 'Select Stack Frame',
+        description: 'Select a stack frame and reveal its source location in VS Code',
+        inputSchema: inputSchemas['select-stack-frame']
+    },
+    handler: async (args: any) => {
+        try {
+            const {
+                threadId,
+                frameId,
+                frameIndex = 0,
+                revealSource = true
+            } = args
+            const session = vscode.debug.activeDebugSession
+
+            if (!session) {
+                return asJsonContent({ message: t('tools.noActiveDebugSession') })
+            }
+
+            let targetThreadId = threadId || getActiveThreadId()
+            if (!targetThreadId) {
+                const threadsResponse = await session.customRequest('threads')
+                targetThreadId = threadsResponse?.threads?.[0]?.id
+            }
+
+            if (!targetThreadId) {
+                return asJsonContent({ message: 'No thread available' })
+            }
+
+            const stackResponse = await session.customRequest('stackTrace', {
+                threadId: targetThreadId,
+                startFrame: 0,
+                levels: 100
+            })
+            const frames = stackResponse?.stackFrames || []
+            const targetIndex = frameId !== undefined ?
+                frames.findIndex((frame: any) => frame.id === frameId) :
+                frameIndex
+            const targetFrame = frames[targetIndex]
+
+            if (!targetFrame) {
+                return asJsonContent({
+                    message: 'Stack frame not found',
+                    threadId: targetThreadId,
+                    frameId,
+                    frameIndex,
+                    totalFrames: stackResponse?.totalFrames || frames.length
+                })
+            }
+
+            const before = summarizeActiveStackItem()
+            const commandErrors = []
+
+            try {
+                await vscode.commands.executeCommand('workbench.action.debug.callStackTop')
+            } catch (error: any) {
+                commandErrors.push(`workbench.action.debug.callStackTop: ${error?.message || String(error)}`)
+            }
+
+            for (let i = 0; i < targetIndex; i++) {
+                try {
+                    await vscode.commands.executeCommand('workbench.action.debug.callStackDown')
+                } catch (error: any) {
+                    commandErrors.push(`workbench.action.debug.callStackDown[${i}]: ${error?.message || String(error)}`)
+                    break
+                }
+            }
+
+            if (targetIndex > 0) {
+                await sleep(100)
+            }
+
+            const activeAfterCommands = summarizeActiveStackItem()
+            if (activeAfterCommands?.type !== 'stackFrame' || activeAfterCommands.frameId !== targetFrame.id) {
+                try {
+                    await vscode.commands.executeCommand('workbench.action.debug.callStackTop')
+                    for (let i = 0; i < targetIndex; i++) {
+                        await vscode.commands.executeCommand('workbench.action.debug.callStackDown')
+                    }
+                    await sleep(100)
+                } catch (error: any) {
+                    commandErrors.push(`callStack retry: ${error?.message || String(error)}`)
+                }
+            }
+
+            let after = summarizeActiveStackItem()
+            if (after?.type !== 'stackFrame' || after.frameId !== targetFrame.id) {
+                try {
+                    await vscode.commands.executeCommand('workbench.action.debug.callStackTop')
+                    await sleep(50)
+                    for (let i = 0; i < targetIndex; i++) {
+                        await vscode.commands.executeCommand('workbench.action.debug.callStackDown')
+                        await sleep(50)
+                    }
+                    await sleep(100)
+                } catch (error: any) {
+                    commandErrors.push(`callStack slow retry: ${error?.message || String(error)}`)
+                }
+            }
+
+            after = summarizeActiveStackItem()
+
+            if (after?.type !== 'stackFrame' || after.frameId !== targetFrame.id) {
+                try {
+                    await vscode.commands.executeCommand('workbench.action.debug.callStackBottom')
+                    const fromBottomSteps = Math.max(frames.length - targetIndex - 1, 0)
+                    for (let i = 0; i < fromBottomSteps; i++) {
+                        await vscode.commands.executeCommand('workbench.action.debug.callStackUp')
+                    }
+                    await sleep(100)
+                } catch (error: any) {
+                    commandErrors.push(`callStack bottom retry: ${error?.message || String(error)}`)
+                }
+            }
+
+            after = summarizeActiveStackItem()
+
+            if (after?.type !== 'stackFrame' || after.frameId !== targetFrame.id) {
+                try {
+                    await vscode.commands.executeCommand('workbench.action.debug.callStackTop')
+                    await sleep(100)
+                    after = summarizeActiveStackItem()
+                } catch (error: any) {
+                    commandErrors.push(`callStack top reset: ${error?.message || String(error)}`)
+                }
+            }
+
+            if (after?.type === 'stackFrame' && after.frameId === frames[0]?.id && targetIndex > 0) {
+                try {
+                    for (let i = 0; i < targetIndex; i++) {
+                        await vscode.commands.executeCommand('workbench.action.debug.callStackDown')
+                        await sleep(100)
+                    }
+                    await sleep(150)
+                } catch (error: any) {
+                    commandErrors.push(`callStack final down: ${error?.message || String(error)}`)
+                }
+            }
+
+            after = summarizeActiveStackItem()
+
+            if (after?.type !== 'stackFrame' || after.frameId !== targetFrame.id) {
+                commandErrors.push('VS Code did not expose a command path that changed debug.activeStackItem to the target frame')
+            }
+
+            const sourceReveal = revealSource ? await revealFrameSource(targetFrame) : undefined
+            after = summarizeActiveStackItem()
+
+            return asJsonContent({
+                threadId: targetThreadId,
+                frameIndex: targetIndex,
+                frameId: targetFrame.id,
+                frame: {
+                    id: targetFrame.id,
+                    name: targetFrame.name,
+                    source: targetFrame.source ? {
+                        name: targetFrame.source.name,
+                        path: targetFrame.source.path,
+                        sourceReference: targetFrame.source.sourceReference
+                    } : null,
+                    line: targetFrame.line,
+                    column: targetFrame.column,
+                    endLine: targetFrame.endLine,
+                    endColumn: targetFrame.endColumn
+                },
+                activeStackItemBefore: before,
+                activeStackItemAfter: after,
+                debugUiSynced: after?.type === 'stackFrame' && after.frameId === targetFrame.id,
+                sourceReveal,
+                commandErrors
+            })
+        } catch (error: any) {
+            return {
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
+                isError: true
+            }
+        }
+    }
+}
+
+// 7. Variables and scopes tool
 export const getVariablesScopeTool = {
     name: 'get-variables-scope',
     config: {
@@ -1165,81 +1540,46 @@ export const getVariablesScopeTool = {
     },
     handler: async (args: any) => {
         try {
-            const { frameId, scopeName } = args
+            const {
+                threadId,
+                frameId,
+                frameIndex,
+                scopeName,
+                includeRegisters = false,
+                depth = DEFAULT_EXPAND_DEPTH,
+                maxChildren = DEFAULT_MAX_CHILDREN
+            } = args
             const session = vscode.debug.activeDebugSession
             
             if (!session) {
                 return {
                     content: [{
                         type: 'text' as const,
-                        text: JSON.stringify({ message: 'No active debug session' }, null, 2)
+                        text: JSON.stringify({ message: t('tools.noActiveDebugSession') }, null, 2)
                     }]
                 }
             }
-            
-            const activeStackItem = vscode.debug.activeStackItem
-            if (!activeStackItem) {
-                return {
-                    content: [{
-                        type: 'text' as const,
-                        text: JSON.stringify({ message: 'No active stack frame' }, null, 2)
-                    }]
-                }
-            }
-            
-            const targetFrameId = frameId || ('frameId' in activeStackItem ? (activeStackItem as any).frameId : undefined)
             
             try {
-                const scopesResponse = await session.customRequest('scopes', {
-                    frameId: targetFrameId
-                })
-                
-                if (scopesResponse && scopesResponse.scopes) {
-                    const allScopes = []
-                    
-                    for (const scope of scopesResponse.scopes) {
-                        if (scopeName && scope.name !== scopeName) continue
-                        
-                        const variablesResponse = await session.customRequest('variables', {
-                            variablesReference: scope.variablesReference
-                        })
-                        
-                        const scopeInfo = {
-                            name: scope.name,
-                            variablesReference: scope.variablesReference,
-                            expensive: scope.expensive,
-                            source: scope.source,
-                            line: scope.line,
-                            column: scope.column,
-                            endLine: scope.endLine,
-                            endColumn: scope.endColumn,
-                            variables: variablesResponse && variablesResponse.variables ? 
-                                variablesResponse.variables.map((v: any) => ({
-                                    name: v.name,
-                                    value: v.value,
-                                    type: v.type,
-                                    variablesReference: v.variablesReference,
-                                    presentationHint: v.presentationHint,
-                                    evaluateName: v.evaluateName
-                                })) : []
-                        }
-                        
-                        allScopes.push(scopeInfo)
-                    }
-                    
-                    const result = {
-                        frameId: targetFrameId,
-                        threadId: activeStackItem.threadId,
-                        scopes: allScopes
-                    }
-                    
-                    return {
-                        content: [{
-                            type: 'text' as const,
-                            text: JSON.stringify(result, null, 2)
-                        }]
-                    }
+                const resolvedFrame = await resolveFrameId(session, { threadId, frameId, frameIndex })
+                const targetFrameId = resolvedFrame.frameId
+                if (targetFrameId === undefined) {
+                    return asJsonContent({ message: 'No stack frame available', threadId, frameIndex })
                 }
+
+                return asJsonContent({
+                    frameId: targetFrameId,
+                    threadId: resolvedFrame.threadId,
+                    frame: resolvedFrame.frame,
+                    depth,
+                    maxChildren,
+                    scopes: await getFrameScopes(session, targetFrameId, {
+                        scopeName,
+                        includeRegisters,
+                        depth,
+                        maxChildren
+                    })
+                })
             } catch (error) {
                 console.log('Variables and scopes request failed:', error)
             }
@@ -1247,19 +1587,145 @@ export const getVariablesScopeTool = {
             return {
                 content: [{
                     type: 'text' as const,
-                    text: JSON.stringify({ message: 'Failed to get variables and scopes' }, null, 2)
+                    text: JSON.stringify({ message: t('resources.variablesFailed') }, null, 2)
                 }]
             }
         } catch (error: any) {
             return {
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true
             }
         }
     }
 }
 
-// 8. 스레드 목록 도구
+// 7-1. Variables by call stack frame tool
+export const getStackVariablesTool = {
+    name: 'get-stack-variables',
+    config: {
+        title: 'Get Stack Variables',
+        description: 'Retrieve variables for each stack frame in one request',
+        inputSchema: inputSchemas['get-stack-variables']
+    },
+    handler: async (args: any) => {
+        try {
+            const {
+                threadId,
+                startFrame = 0,
+                levels = 20,
+                scopeName,
+                includeRegisters = false,
+                depth = DEFAULT_EXPAND_DEPTH,
+                maxChildren = DEFAULT_MAX_CHILDREN
+            } = args
+            const session = vscode.debug.activeDebugSession
+
+            if (!session) {
+                return asJsonContent({ message: t('tools.noActiveDebugSession') })
+            }
+
+            let targetThreadId = threadId || getActiveThreadId()
+            if (!targetThreadId) {
+                const threadsResponse = await session.customRequest('threads')
+                targetThreadId = threadsResponse?.threads?.[0]?.id
+            }
+
+            if (!targetThreadId) {
+                return asJsonContent({ message: 'No thread available' })
+            }
+
+            const response = await session.customRequest('stackTrace', {
+                threadId: targetThreadId,
+                startFrame,
+                levels
+            })
+            const frames = response?.stackFrames || []
+
+            return asJsonContent({
+                threadId: targetThreadId,
+                startFrame,
+                levels,
+                totalFrames: response?.totalFrames,
+                depth,
+                maxChildren,
+                frames: await Promise.all(frames.map(async (frame: any, offset: number) => ({
+                    index: startFrame + offset,
+                    id: frame.id,
+                    name: frame.name,
+                    source: frame.source ? {
+                        name: frame.source.name,
+                        path: frame.source.path,
+                        sourceReference: frame.source.sourceReference
+                    } : null,
+                    line: frame.line,
+                    column: frame.column,
+                    endLine: frame.endLine,
+                    endColumn: frame.endColumn,
+                    canRestart: frame.canRestart,
+                    instructionPointerReference: frame.instructionPointerReference,
+                    moduleId: frame.moduleId,
+                    presentationHint: frame.presentationHint,
+                    scopes: await getFrameScopes(session, frame.id, {
+                        scopeName,
+                        includeRegisters,
+                        depth,
+                        maxChildren
+                    })
+                })))
+            })
+        } catch (error: any) {
+            return {
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
+                isError: true
+            }
+        }
+    }
+}
+
+// 7-2. Expand variable reference tool
+export const expandVariableTool = {
+    name: 'expand-variable',
+    config: {
+        title: 'Expand Variable',
+        description: 'Expand a DAP variablesReference and optionally recurse into child variables',
+        inputSchema: inputSchemas['expand-variable']
+    },
+    handler: async (args: any) => {
+        try {
+            const {
+                variablesReference,
+                depth = DEFAULT_EXPAND_DEPTH,
+                maxChildren = DEFAULT_MAX_CHILDREN
+            } = args
+            const session = vscode.debug.activeDebugSession
+
+            if (!session) {
+                return asJsonContent({ message: t('tools.noActiveDebugSession') })
+            }
+
+            const variables = await getExpandedVariables(
+                session,
+                variablesReference,
+                depth,
+                maxChildren
+            )
+
+            return asJsonContent({
+                variablesReference,
+                depth,
+                maxChildren,
+                variables
+            })
+        } catch (error: any) {
+            return {
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
+                isError: true
+            }
+        }
+    }
+}
+
+// 8. Thread list tool
 export const getThreadListTool = {
     name: 'get-thread-list',
     config: {
@@ -1275,7 +1741,7 @@ export const getThreadListTool = {
                 return {
                     content: [{
                         type: 'text' as const,
-                        text: JSON.stringify({ message: 'No active debug session' }, null, 2)
+                        text: JSON.stringify({ message: t('tools.noActiveDebugSession') }, null, 2)
                     }]
                 }
             }
@@ -1309,19 +1775,19 @@ export const getThreadListTool = {
             return {
                 content: [{
                     type: 'text' as const,
-                    text: JSON.stringify({ message: 'Failed to get thread list' }, null, 2)
+                    text: JSON.stringify({ message: t('resources.threadListFailed') }, null, 2)
                 }]
             }
         } catch (error: any) {
             return {
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true
             }
         }
     }
 }
 
-// 9. 예외 정보 도구
+// 9. Exception info tool
 export const getExceptionInfoTool = {
     name: 'get-exception-info',
     config: {
@@ -1338,12 +1804,12 @@ export const getExceptionInfoTool = {
                 return {
                     content: [{
                         type: 'text' as const,
-                        text: JSON.stringify({ message: 'No active debug session' }, null, 2)
+                        text: JSON.stringify({ message: t('tools.noActiveDebugSession') }, null, 2)
                     }]
                 }
             }
             
-            // DAP 메시지 수집이 비활성화되어 예외 정보를 수집할 수 없음
+            // Exception details cannot be collected while DAP message collection is disabled.
             return {
                 content: [{
                     type: 'text' as const,
@@ -1358,14 +1824,14 @@ export const getExceptionInfoTool = {
             }
         } catch (error: any) {
             return {
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true
             }
         }
     }
 }
 
-// 10. VSCode 인스턴스 선택 도구
+// 10. VS Code instance selection tool
 export const selectVSCodeInstanceTool = {
     name: 'select-vscode-instance',
     config: {
@@ -1377,55 +1843,16 @@ export const selectVSCodeInstanceTool = {
         try {
             const { port, workspace } = args
             
-            // 글로벌 레지스트리 읽기
-            const registryPath = path.join(os.homedir(), '.mcp-debug-tools', 'active-configs.json')
-            
-            if (!fs.existsSync(registryPath)) {
-                return {
-                    content: [{
-                        type: 'text' as const,
-                        text: JSON.stringify({
-                            message: 'No active VSCode instances found',
-                            registryPath: registryPath
-                        }, null, 2)
-                    }]
-                }
-            }
-            
-            const registryData = fs.readFileSync(registryPath, 'utf8')
-            const registry = JSON.parse(registryData)
-            
-            // 활성 인스턴스 필터링
-            const activeInstances = (registry.activeInstances || []).filter((entry: RegistryEntry) => {
-                if (fs.existsSync(entry.configPath)) {
-                    try {
-                        const configData = fs.readFileSync(entry.configPath, 'utf8')
-                        const config = JSON.parse(configData) as WorkspaceConfig
-                        
-                        // PID 체크만 수행
-                        try {
-                            process.kill(config.pid, 0)
-                            return true // 프로세스가 살아있으면 활성
-                        } catch {
-                            return false
-                        }
-                    } catch {
-                        return false
-                    }
-                }
-                return false
-            })
+            const activeInstances = await loadActiveInstances()
             
             if (activeInstances.length === 0) {
-                return {
-                    content: [{
-                        type: 'text' as const,
-                        text: JSON.stringify({ message: 'No active VSCode instances found' }, null, 2)
-                    }]
-                }
+                return asJsonContent({
+                    message: 'No active VSCode instances found',
+                    registryPath: getRegistryPath()
+                })
             }
             
-            // 포트나 workspace로 선택
+            // Select by port or workspace
             let selectedInstance = null
             
             if (port) {
@@ -1437,47 +1864,37 @@ export const selectVSCodeInstanceTool = {
             }
             
             if (selectedInstance) {
-                return {
-                    content: [{
-                        type: 'text' as const,
-                        text: JSON.stringify({
-                            message: 'VSCode instance selected',
-                            instance: {
-                                port: selectedInstance.port,
-                                workspaceName: selectedInstance.workspaceName,
-                                workspacePath: selectedInstance.workspacePath,
-                                pid: selectedInstance.pid,
-                                connectionUrl: `http://localhost:${selectedInstance.port}/mcp`
-                            },
-                            recommendation: `Use --port=${selectedInstance.port} when running the CLI`
-                        }, null, 2)
-                    }]
-                }
+                return asJsonContent({
+                    message: 'VSCode instance selected',
+                    instance: {
+                        port: selectedInstance.port,
+                        workspaceName: selectedInstance.workspaceName,
+                        workspacePath: selectedInstance.workspacePath,
+                        pid: selectedInstance.pid,
+                        connectionUrl: `http://localhost:${selectedInstance.port}/mcp`
+                    },
+                    recommendation: `Use --port=${selectedInstance.port} when running the CLI`
+                })
             } else {
-                return {
-                    content: [{
-                        type: 'text' as const,
-                        text: JSON.stringify({
-                            message: 'No matching VSCode instance found',
-                            availableInstances: activeInstances.map((i: RegistryEntry) => ({
-                                port: i.port,
-                                workspaceName: i.workspaceName,
-                                workspacePath: i.workspacePath
-                            }))
-                        }, null, 2)
-                    }]
-                }
+                return asJsonContent({
+                    message: 'No matching VSCode instance found',
+                    availableInstances: activeInstances.map((i: RegistryEntry) => ({
+                        port: i.port,
+                        workspaceName: i.workspaceName,
+                        workspacePath: i.workspacePath
+                    }))
+                })
             }
         } catch (error: any) {
             return {
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true
             }
         }
     }
 }
 
-// 11. Workspace 정보 조회 도구
+// 11. Workspace information tool
 export const getWorkspaceInfoTool = {
     name: 'get-workspace-info',
     config: {
@@ -1493,43 +1910,19 @@ export const getWorkspaceInfoTool = {
                 return {
                     content: [{
                         type: 'text' as const,
-                        text: JSON.stringify({ message: 'No workspace folder open' }, null, 2)
+                        text: JSON.stringify({ message: t('tools.noWorkspaceFolder') }, null, 2)
                     }]
                 }
             }
             
-            // 설정 파일 확인
-            const configPath = path.join(workspaceFolder.uri.fsPath, '.mcp-debug-tools', 'config.json')
-            let configInfo = null
-            
-            if (fs.existsSync(configPath)) {
-                try {
-                    const configData = fs.readFileSync(configPath, 'utf8')
-                    const config = JSON.parse(configData) as WorkspaceConfig
-                    // PID 체크로 활성 상태 확인
-                    let isAlive = false
-                    try {
-                        process.kill(config.pid, 0)
-                        isAlive = true
-                    } catch {
-                        isAlive = false
-                    }
-                    
-                    configInfo = {
-                        port: config.port,
-                        pid: config.pid,
-                        isAlive: isAlive
-                    }
-                } catch (error) {
-                    configInfo = { error: 'Failed to read config file' }
-                }
-            }
+            const configPath = getWorkspaceConfigPath(workspaceFolder.uri.fsPath)
             
             const workspaceInfo = {
                 name: workspaceFolder.name,
                 path: workspaceFolder.uri.fsPath,
-                configFile: configPath,
-                configStatus: configInfo || 'No config file',
+                legacyConfigFile: configPath,
+                workspaceConfigWritten: fs.existsSync(configPath),
+                registryPath: getRegistryPath(),
                 serverInfo: {
                     isRunning: state.isServerRunning(),
                     port: state.currentPort,
@@ -1538,22 +1931,17 @@ export const getWorkspaceInfoTool = {
                 }
             }
             
-            return {
-                content: [{
-                    type: 'text' as const,
-                    text: JSON.stringify(workspaceInfo, null, 2)
-                }]
-            }
+            return asJsonContent(workspaceInfo)
         } catch (error: any) {
             return {
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true
             }
         }
     }
 }
 
-// 12. VSCode 인스턴스 목록 도구
+// 12. VS Code instance list tool
 export const listVSCodeInstancesTool = {
     name: 'list-vscode-instances',
     config: {
@@ -1563,83 +1951,17 @@ export const listVSCodeInstancesTool = {
     },
     handler: async (args: any) => {
         try {
-            const registryPath = path.join(os.homedir(), '.mcp-debug-tools', 'active-configs.json')
+            const instances = (await loadActiveInstances()).map((entry: RegistryEntry) => ({
+                port: entry.port,
+                workspaceName: entry.workspaceName,
+                workspacePath: entry.workspacePath,
+                pid: entry.pid,
+                instanceId: entry.vscodeInstanceId,
+                status: isEntryAlive(entry) ? 'active' : 'stale',
+                connectionUrl: `http://localhost:${entry.port}/mcp`
+            }))
             
-            if (!fs.existsSync(registryPath)) {
-                return {
-                    content: [{
-                        type: 'text' as const,
-                        text: JSON.stringify({
-                            message: 'No registry file found',
-                            instances: []
-                        }, null, 2)
-                    }]
-                }
-            }
-            
-            const registryData = fs.readFileSync(registryPath, 'utf8')
-            const registry = JSON.parse(registryData)
-            
-            // 활성 인스턴스 확인 및 상세 정보 수집
-            const instances = []
-            
-            for (const entry of (registry.activeInstances || [])) {
-                if (fs.existsSync(entry.configPath)) {
-                    try {
-                        const configData = fs.readFileSync(entry.configPath, 'utf8')
-                        const config = JSON.parse(configData) as WorkspaceConfig
-                        
-                        // PID 체크만 수행
-                        let isAlive = false
-                        try {
-                            process.kill(config.pid, 0)
-                            isAlive = true
-                        } catch {
-                            isAlive = false
-                        }
-                        
-                        if (isAlive) {
-                            instances.push({
-                                port: config.port,
-                                workspaceName: config.workspaceName,
-                                workspacePath: config.workspacePath,
-                                pid: config.pid,
-                                instanceId: config.vscodeInstanceId,
-                                status: 'active',
-                                connectionUrl: `http://localhost:${config.port}/mcp`
-                            })
-                        } else {
-                            instances.push({
-                                port: config.port,
-                                workspaceName: config.workspaceName,
-                                workspacePath: config.workspacePath,
-                                pid: config.pid,
-                                instanceId: config.vscodeInstanceId,
-                                status: 'stale',
-                                reason: 'process not found'
-                            })
-                        }
-                    } catch (error) {
-                        // 설정 파일 읽기 실패
-                        instances.push({
-                            workspaceName: entry.workspaceName,
-                            workspacePath: entry.workspacePath,
-                            status: 'error',
-                            error: 'Failed to read config file'
-                        })
-                    }
-                } else {
-                    // 설정 파일 없음
-                    instances.push({
-                        workspaceName: entry.workspaceName,
-                        workspacePath: entry.workspacePath,
-                        status: 'missing',
-                        configPath: entry.configPath
-                    })
-                }
-            }
-            
-            // 현재 VSCode 인스턴스 정보 추가
+            // Include current VS Code instance information.
             const currentWorkspace = vscode.workspace.workspaceFolders?.[0]
             const currentInfo = currentWorkspace ? {
                 currentInstance: {
@@ -1650,27 +1972,23 @@ export const listVSCodeInstancesTool = {
                 }
             } : {}
             
-            return {
-                content: [{
-                    type: 'text' as const,
-                    text: JSON.stringify({
-                        ...currentInfo,
-                        totalInstances: instances.length,
-                        activeInstances: instances.filter(i => i.status === 'active').length,
-                        instances: instances
-                    }, null, 2)
-                }]
-            }
+            return asJsonContent({
+                ...currentInfo,
+                registryPath: getRegistryPath(),
+                totalInstances: instances.length,
+                activeInstances: instances.filter(i => i.status === 'active').length,
+                instances: instances
+            })
         } catch (error: any) {
             return {
-                content: [{ type: 'text' as const, text: `Error: ${error.message}` }],
+                content: [{ type: 'text' as const, text: t('tools.error', { error: error.message }) }],
                 isError: true
             }
         }
     }
 }
 
-// 모든 도구 export
+// Export all tools
 export const allTools = [
     addBreakpointTool,
     addBreakpointsTool,
@@ -1690,18 +2008,21 @@ export const allTools = [
     listDebugConfigsTool,
     selectDebugConfigTool,
     
-    // 새로운 도구들 추가
+    // Additional tools
     getDapLogTool,
     getBreakpointsTool,
     getActiveSessionTool,
     getDebugConsoleTool,
     getActiveStackItemTool,
     getCallStackTool,
+    selectStackFrameTool,
     getVariablesScopeTool,
+    getStackVariablesTool,
+    expandVariableTool,
     getThreadListTool,
     getExceptionInfoTool,
     
-    // 새로운 Workspace 관련 도구들 추가
+    // Additional workspace-related tools
     selectVSCodeInstanceTool,
     getWorkspaceInfoTool,
     listVSCodeInstancesTool

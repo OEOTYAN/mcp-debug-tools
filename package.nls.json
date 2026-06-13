@@ -1,0 +1,7 @@
+{
+  "extension.displayName": "MCP Debug Tools",
+  "extension.description": "VS Code extension for MCP-based debugging with DAP protocol support",
+  "command.addBreakpoint.title": "Add Breakpoint",
+  "command.openMonitorPanel.title": "Open Monitor Panel",
+  "command.category": "DAP Proxy"
+}

@@ -2,8 +2,9 @@ import * as vscode from 'vscode'
 import { state } from './state'
 import { getRelativePath } from './utils/path'
 import { parseJsonWithComments } from './utils/json'
+import { t } from './i18n'
 
-// DAP 로그 (기존)
+// DAP log (legacy resource)
 export const dapLogResource = {
     name: 'dap-log',
     uri: 'dap-log://current',
@@ -22,7 +23,7 @@ export const dapLogResource = {
     }
 }
 
-// 브레이크포인트 목록
+// Breakpoint list
 export const breakpointsResource = {
     name: 'breakpoints',
     uri: 'debug://breakpoints',
@@ -55,7 +56,7 @@ export const breakpointsResource = {
     }
 }
 
-// 활성 디버그 세션
+// Active debug session
 export const activeSessionResource = {
     name: 'active-session',
     uri: 'debug://active-session',
@@ -71,7 +72,7 @@ export const activeSessionResource = {
             return {
                 contents: [{
                     uri: uri.href,
-                    text: JSON.stringify({ message: 'No active debug session' }, null, 2)
+                    text: JSON.stringify({ message: t('tools.noActiveDebugSession') }, null, 2)
                 }]
             }
         }
@@ -93,7 +94,7 @@ export const activeSessionResource = {
     }
 }
 
-// 디버그 콘솔 출력
+// Debug console output
 export const debugConsoleResource = {
     name: 'debug-console',
     uri: 'debug://console',
@@ -107,13 +108,13 @@ export const debugConsoleResource = {
         return {
             contents: [{
                 uri: uri.href,
-                text: 'No debug console output available (DAP message tracking disabled)'
+                text: t('resources.debugConsoleUnavailable')
             }]
         }
     }
 }
 
-// 활성 스택 아이템 (스레드/스택 프레임)
+// Active stack item (thread or stack frame)
 export const activeStackItemResource = {
     name: 'active-stack-item',
     uri: 'debug://active-stack-item',
@@ -129,13 +130,13 @@ export const activeStackItemResource = {
             return {
                 contents: [{
                     uri: uri.href,
-                    text: JSON.stringify({ message: 'No focused thread or stack frame' }, null, 2)
+                    text: JSON.stringify({ message: t('resources.noFocusedStackItem') }, null, 2)
                 }]
             }
         }
         
-        // VS Code Debug API의 activeStackItem은 내부 정보가 제한적이므로
-        // 기본 정보만 반환
+        // VS Code Debug API exposes limited activeStackItem internals,
+        // so return only basic information.
         const itemInfo: any = {
             type: 'frameId' in activeStackItem ? 'stackFrame' : 'thread',
             sessionId: activeStackItem.session.id,
@@ -143,12 +144,12 @@ export const activeStackItemResource = {
             sessionType: activeStackItem.session.type
         }
         
-        // 스택 프레임인 경우
+        // Stack frame case
         if ('frameId' in activeStackItem) {
             itemInfo.frameId = (activeStackItem as any).frameId
             itemInfo.threadId = activeStackItem.threadId
         } else {
-            // 스레드인 경우
+            // Thread case
             itemInfo.threadId = activeStackItem.threadId
         }
         
@@ -161,7 +162,7 @@ export const activeStackItemResource = {
     }
 }
 
-// 콜스택 정보
+// Call stack information
 export const callStackResource = {
     name: 'call-stack',
     uri: 'debug://call-stack',
@@ -177,7 +178,7 @@ export const callStackResource = {
                 return {
                     contents: [{
                         uri: uri.href,
-                        text: JSON.stringify({ message: 'No active debug session' }, null, 2)
+                        text: JSON.stringify({ message: t('tools.noActiveDebugSession') }, null, 2)
                     }]
                 }
             }
@@ -187,17 +188,17 @@ export const callStackResource = {
                 return {
                     contents: [{
                         uri: uri.href,
-                        text: JSON.stringify({ message: 'No active stack frame' }, null, 2)
+                        text: JSON.stringify({ message: t('resources.noActiveStackFrame') }, null, 2)
                     }]
                 }
             }
             
-            // DAP stackTrace 요청으로 콜스택 정보 가져오기
+            // Fetch call stack information through the DAP stackTrace request.
             try {
                 const response = await session.customRequest('stackTrace', {
                     threadId: activeStackItem.threadId,
                     startFrame: 0,
-                    levels: 100 // 충분한 수의 프레임 가져오기
+                    levels: 100 // Fetch enough frames for inspection
                 })
                 
                 if (response && response.stackFrames) {
@@ -237,7 +238,7 @@ export const callStackResource = {
             return {
                 contents: [{
                     uri: uri.href,
-                    text: JSON.stringify({ message: 'Failed to get call stack' }, null, 2)
+                    text: JSON.stringify({ message: t('resources.callStackFailed') }, null, 2)
                 }]
             }
         } catch (error: any) {
@@ -251,7 +252,7 @@ export const callStackResource = {
     }
 }
 
-// 변수/스코프 정보
+// Variables and scope information
 export const variablesScopeResource = {
     name: 'variables-scope',
     uri: 'debug://variables-scope',
@@ -267,7 +268,7 @@ export const variablesScopeResource = {
                 return {
                     contents: [{
                         uri: uri.href,
-                        text: JSON.stringify({ message: 'No active debug session' }, null, 2)
+                        text: JSON.stringify({ message: t('tools.noActiveDebugSession') }, null, 2)
                     }]
                 }
             }
@@ -277,12 +278,12 @@ export const variablesScopeResource = {
                 return {
                     contents: [{
                         uri: uri.href,
-                        text: JSON.stringify({ message: 'No active stack frame' }, null, 2)
+                        text: JSON.stringify({ message: t('resources.noActiveStackFrame') }, null, 2)
                     }]
                 }
             }
             
-            // DAP scopes 요청으로 스코프 정보 가져오기
+            // Fetch scope information through the DAP scopes request.
             try {
                 const scopesResponse = await session.customRequest('scopes', {
                     frameId: 'frameId' in activeStackItem ? (activeStackItem as any).frameId : undefined
@@ -291,7 +292,7 @@ export const variablesScopeResource = {
                 if (scopesResponse && scopesResponse.scopes) {
                     const allScopes = []
                     
-                    // 각 스코프에서 variables 요청
+                    // Request variables for each scope.
                     for (const scope of scopesResponse.scopes) {
                         const variablesResponse = await session.customRequest('variables', {
                             variablesReference: scope.variablesReference
@@ -340,7 +341,7 @@ export const variablesScopeResource = {
             return {
                 contents: [{
                     uri: uri.href,
-                    text: JSON.stringify({ message: 'Failed to get variables and scopes' }, null, 2)
+                    text: JSON.stringify({ message: t('resources.variablesFailed') }, null, 2)
                 }]
             }
         } catch (error: any) {
@@ -354,7 +355,7 @@ export const variablesScopeResource = {
     }
 }
 
-// 스레드 목록
+// Thread list
 export const threadListResource = {
     name: 'thread-list',
     uri: 'debug://thread-list',
@@ -370,12 +371,12 @@ export const threadListResource = {
                 return {
                     contents: [{
                         uri: uri.href,
-                        text: JSON.stringify({ message: 'No active debug session' }, null, 2)
+                        text: JSON.stringify({ message: t('tools.noActiveDebugSession') }, null, 2)
                     }]
                 }
             }
             
-            // DAP threads 요청으로 스레드 목록 가져오기
+            // Fetch the thread list through the DAP threads request.
             try {
                 const response = await session.customRequest('threads')
                 
@@ -405,7 +406,7 @@ export const threadListResource = {
             return {
                 contents: [{
                     uri: uri.href,
-                    text: JSON.stringify({ message: 'Failed to get thread list' }, null, 2)
+                    text: JSON.stringify({ message: t('resources.threadListFailed') }, null, 2)
                 }]
             }
         } catch (error: any) {
@@ -419,7 +420,7 @@ export const threadListResource = {
     }
 }
 
-// 예외 정보
+// Exception information
 export const exceptionInfoResource = {
     name: 'exception-info',
     uri: 'debug://exception-info',
@@ -435,7 +436,7 @@ export const exceptionInfoResource = {
                 return {
                     contents: [{
                         uri: uri.href,
-                        text: JSON.stringify({ message: 'No active debug session' }, null, 2)
+                        text: JSON.stringify({ message: t('tools.noActiveDebugSession') }, null, 2)
                     }]
                 }
             }
@@ -446,7 +447,7 @@ export const exceptionInfoResource = {
                 contents: [{
                     uri: uri.href,
                     text: JSON.stringify({
-                        message: 'Exception information not available (DAP message tracking disabled)'
+                        message: t('resources.exceptionUnavailable')
                     }, null, 2)
                 }]
             }
@@ -461,7 +462,7 @@ export const exceptionInfoResource = {
     }
 }
 
-// 모든 리소스 export
+// Export all resources
 export const allResources = [
     dapLogResource,
     breakpointsResource,

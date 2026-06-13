@@ -5,6 +5,7 @@ import { createMonitoringPanel } from './monitor-panel'
 import { initializeMcpServer, createHttpApp, startHttpServer, stopHttpServer } from './server'
 import { state } from './state'
 import { updateAllPanels } from './monitor-panel'
+import { t } from './i18n'
 
 // Status bar update function (import from extension.ts)
 let updateStatusBar: (status: 'initializing' | 'running' | 'stopping' | 'error' | 'stopped') => void
@@ -38,7 +39,7 @@ export async function addBreakpointToUri(filePath: string, lineNumber: number) {
         
         vscode.debug.addBreakpoints([newBreakpoint])
     } catch (error) {
-        console.error(`❌ [ERROR] Failed to add breakpoint:`, error)
+        console.error(t('commands.addBreakpointFailed', { error }))
         throw error
     }
 }
@@ -48,7 +49,7 @@ export async function addBreakpointToUri(filePath: string, lineNumber: number) {
  */
 async function startServer() {
     if (state.isServerRunning()) {
-        vscode.window.showInformationMessage('Server is already running')
+        vscode.window.showInformationMessage(t('commands.serverAlreadyRunning'))
         return
     }
     
@@ -66,11 +67,11 @@ async function startServer() {
         await startHttpServer(app, () => {
             updateStatusBar('running')
             updateAllPanels()
-            vscode.window.showInformationMessage('Server started successfully')
+            vscode.window.showInformationMessage(t('commands.serverStarted'))
         })
     } catch (error) {
         updateStatusBar('error')
-        vscode.window.showErrorMessage(`Failed to start server: ${error}`)
+        vscode.window.showErrorMessage(t('commands.startServerFailed', { error }))
         throw error
     }
 }
@@ -80,7 +81,7 @@ async function startServer() {
  */
 async function stopServer() {
     if (!state.isServerRunning()) {
-        vscode.window.showInformationMessage('Server is not running')
+        vscode.window.showInformationMessage(t('commands.serverNotRunning'))
         return
     }
     
@@ -100,9 +101,9 @@ async function stopServer() {
         
         updateStatusBar('stopped')
         updateAllPanels()
-        vscode.window.showInformationMessage('Server stopped successfully')
+        vscode.window.showInformationMessage(t('commands.serverStopped'))
     } catch (error) {
-        vscode.window.showErrorMessage(`Failed to stop server: ${error}`)
+        vscode.window.showErrorMessage(t('commands.stopServerFailed', { error }))
         throw error
     }
 }
@@ -115,7 +116,7 @@ function safeRegisterCommand(context: vscode.ExtensionContext, commandId: string
         const command = vscode.commands.registerCommand(commandId, callback)
         context.subscriptions.push(command)
     } catch (error) {
-        console.warn(`[Command] Command ${commandId} could not be registered (possibly already exists).`)
+        console.warn(t('commands.commandRegisterFailed', { commandId }))
     }
 }
 
@@ -127,12 +128,12 @@ export function registerCommands(context: vscode.ExtensionContext): void {
     safeRegisterCommand(context, 'dap-proxy.addUnboundBreakpoint', async () => {
         const activeEditor = vscode.window.activeTextEditor
         if (!activeEditor) {
-            vscode.window.showErrorMessage('No active text editor. Open a file and try again.')
+            vscode.window.showErrorMessage(t('commands.noActiveEditor'))
             return
         }
         
         const lineNumberStr = await vscode.window.showInputBox({
-            prompt: 'Enter the line number to set the breakpoint on',
+            prompt: t('commands.linePrompt'),
             placeHolder: '10'
         })
 
@@ -142,7 +143,7 @@ export function registerCommands(context: vscode.ExtensionContext): void {
 
         const lineNumber = parseInt(lineNumberStr, 10)
         if (isNaN(lineNumber) || lineNumber <= 0) {
-            vscode.window.showErrorMessage('Invalid line number.')
+            vscode.window.showErrorMessage(t('commands.invalidLineNumber'))
             return
         }
         
@@ -150,7 +151,7 @@ export function registerCommands(context: vscode.ExtensionContext): void {
         const relativePath = getRelativePath(absolutePath)
         
         await addBreakpointToUri(relativePath, lineNumber)
-        vscode.window.showInformationMessage(`Breakpoint added to ${relativePath}:${lineNumber}`)
+        vscode.window.showInformationMessage(t('commands.breakpointAdded', { file: relativePath, line: lineNumber }))
     })
 
     // Command to open monitor panel

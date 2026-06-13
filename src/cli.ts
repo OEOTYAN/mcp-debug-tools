@@ -5,10 +5,9 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { createMcpClient } from './mcp-client.js'
 import { ConfigFinder } from './config-finder.js'
 import { listToolsAndResources, callTool, readResource } from './cli-action.js'
+import { t } from './i18n.js'
 
-// 로그 함수 - stdio 통신에 영향을 주지 않도록 별도 처리
 function logInfo(message: string) {
-    // stderr로 출력하되, stdio 통신과 분리
     process.stderr.write(`[CLI] ${message}\n`)
 }
 
@@ -19,24 +18,24 @@ async function getServerUrl(options: any): Promise<string> {
 
     if (port !== null) {
         if (isNaN(port) || port < 1 || port > 65535) {
-            console.error('❌ 잘못된 포트 번호입니다')
+            console.error(t('cli.invalidPort'))
             process.exit(1)
         }
         autoConnect = false
     }
 
     if (autoConnect && !port) {
-        logInfo('🔍 VSCode 인스턴스 자동 탐색 중...')
+        logInfo(t('cli.autoDiscovering'))
         const instance = await ConfigFinder.findVSCodeInstance()
         
         if (instance) {
             port = instance.port
             if (instance.workspace) {
-                logInfo(`📁 Workspace: ${instance.workspace}`)
+                logInfo(t('cli.workspace', { workspace: instance.workspace }))
             }
-            logInfo(`✨ 자동 탐색 성공! Port: ${port}`)
+            logInfo(t('cli.autoDiscoverSuccess', { port }))
         } else {
-            logInfo('⚠️ VSCode 인스턴스를 찾을 수 없음, 기본 포트 사용')
+            logInfo(t('cli.autoDiscoverFallback'))
             port = 8890
         }
     } else if (!port) {
@@ -47,10 +46,10 @@ async function getServerUrl(options: any): Promise<string> {
 }
 
 async function startProxy(serverUrl: string) {
-    logInfo('🚀 DAP Proxy MCP 클라이언트 시작')
+    logInfo(t('cli.proxyStarting'))
     logInfo('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
-    logInfo(`🎯 서버 URL: ${serverUrl}`)
-    logInfo('🔗 VSCode 확장에 HTTP 연결 시도...')
+    logInfo(t('cli.serverUrl', { url: serverUrl }))
+    logInfo(t('cli.connectingExtension'))
     
     let retries = 0
     const maxRetries = 3
@@ -59,31 +58,31 @@ async function startProxy(serverUrl: string) {
     while (retries < maxRetries) {
         try {
             proxy = await createMcpClient(serverUrl)
-            logInfo('✅ VSCode 확장 HTTP 연결 성공')
+            logInfo(t('cli.extensionConnected'))
             break
         } catch (error) {
             retries++
             if (retries < maxRetries) {
-                logInfo(`⚠️ 연결 실패, 재시도 ${retries}/${maxRetries}...`)
+                logInfo(t('cli.connectionRetry', { retry: retries, max: maxRetries }))
                 await new Promise(resolve => setTimeout(resolve, 2000))
             } else {
-                console.error('❌ VSCode 확장 연결 실패')
-                console.error('VSCode에서 DAP Proxy 확장이 실행 중인지 확인하세요')
+                console.error(t('cli.extensionConnectionFailed'))
+                console.error(t('cli.checkExtensionRunning'))
                 process.exit(1)
             }
         }
     }
 
-    logInfo('📡 stdio transport 시작...')
+    logInfo(t('cli.stdioStarting'))
     try {
         const transport = new StdioServerTransport()
         await proxy!.connect(transport)
-        logInfo('✅ MCP 클라이언트 준비 완료!')
+        logInfo(t('cli.clientReady'))
         logInfo('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
     } catch (error) {
-        console.error('❌ 오류 발생:', error)
+        console.error(t('cli.errorOccurred', { error }))
         if (error instanceof Error) {
-            console.error('스택 트레이스:', error.stack)
+            console.error(t('cli.stackTrace', { stack: error.stack }))
         }
         process.exit(1)
     }
@@ -95,9 +94,9 @@ program
     .name('mcp-debug-tools')
     .description('CLI and MCP proxy for VSCode debugging via DAP')
     .version('1.0.2')
-    .option('--port <number>', 'DAP Proxy 서버 포트 지정 (자동 탐색 비활성화)')
-    .option('--domain <url>', 'DAP Proxy 서버 도메인', 'http://localhost')
-    .option('--no-auto', '자동 VSCode 탐색 비활성화')
+    .option('--port <number>', t('cli.option.port'))
+    .option('--domain <url>', t('cli.option.domain'), 'http://localhost')
+    .option('--no-auto', t('cli.option.noAuto'))
 
 program
     .command('proxy', { isDefault: true })
@@ -136,6 +135,6 @@ program
     })
 
 program.parseAsync(process.argv).catch(err => {
-    console.error('치명적 오류:', err)
+    console.error(t('cli.fatalError', { error: err }))
     process.exit(1)
 })

@@ -1,13 +1,14 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { inputSchemas } from './tools-parameters.js'
+import { t } from './i18n.js'
 
 function logStderr(message: string) {
     process.stderr.write(`[CLI Action] ${message}\n`)
 }
 
 async function createClient(serverUrl: string): Promise<{ client: Client, transport: StreamableHTTPClientTransport }> {
-    logStderr(`🔗 연결 시도: ${serverUrl}`)
+    logStderr(t('cliAction.connecting', { url: serverUrl }))
     
     const client = new Client({
         name: 'dap-proxy-action-client',
@@ -18,9 +19,49 @@ async function createClient(serverUrl: string): Promise<{ client: Client, transp
 
     const transport = new StreamableHTTPClientTransport(new URL(serverUrl))
     await client.connect(transport)
-    logStderr('✅ 연결 성공')
+    logStderr(t('cliAction.connected'))
     
     return { client, transport }
+}
+
+async function postJsonRpc(serverUrl: string, method: string, params: any, timeoutMs = 30000) {
+    logStderr(t('cliAction.directConnecting', { url: serverUrl }))
+
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), timeoutMs)
+
+    try {
+        const response = await fetch(serverUrl, {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json'
+            },
+            body: JSON.stringify({
+                jsonrpc: '2.0',
+                id: Date.now(),
+                method,
+                params
+            }),
+            signal: controller.signal
+        })
+
+        const responseText = await response.text()
+        let payload: any
+        try {
+            payload = responseText ? JSON.parse(responseText) : {}
+        } catch {
+            throw new Error(`Invalid JSON response: ${responseText}`)
+        }
+
+        if (!response.ok || payload.error) {
+            throw new Error(payload.error?.message || `HTTP ${response.status}: ${responseText}`)
+        }
+
+        logStderr(t('cliAction.directSuccess'))
+        return payload.result
+    } finally {
+        clearTimeout(timeout)
+    }
 }
 
 export async function listToolsAndResources(serverUrl: string) {
@@ -29,7 +70,7 @@ export async function listToolsAndResources(serverUrl: string) {
         clientObj = await createClient(serverUrl)
         const { client } = clientObj
         
-        logStderr('도구 및 리소스 목록 가져오는 중...')
+        logStderr(t('cliAction.listToolsResources'))
         
         const toolsResult = await client.listTools()
         const resourcesResult = await client.listResources()
@@ -47,10 +88,10 @@ export async function listToolsAndResources(serverUrl: string) {
             mimeType: r.mimeType
         }))
 
-        // stdout에는 순수 JSON 결과만 출력
+        // Keep stdout as pure JSON.
         process.stdout.write(JSON.stringify({ tools, resources }, null, 2) + '\n')
     } catch (error: any) {
-        logStderr(`❌ 오류: ${error.message}`)
+        logStderr(t('cliAction.error', { error: error.message }))
         process.exit(1)
     } finally {
         if (clientObj?.transport) {
@@ -61,71 +102,50 @@ export async function listToolsAndResources(serverUrl: string) {
 }
 
 export async function callTool(serverUrl: string, toolName: string, argsStr?: string) {
-    let clientObj
     try {
         let args = {}
         if (argsStr) {
             try {
                 args = JSON.parse(argsStr)
             } catch (err) {
-                logStderr(`❌ 인자 JSON 파싱 오류: ${argsStr}`)
+                logStderr(t('cliAction.argsJsonParseError', { args: argsStr }))
                 process.exit(1)
             }
         }
 
-        clientObj = await createClient(serverUrl)
-        const { client } = clientObj
-        
-        logStderr(`🛠️ 도구 호출: ${toolName}`)
-        
-        // 타임아웃 Promise 설정 (30초)
-        const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => {
-                reject(new Error(`Tool ${toolName} timed out after 30 seconds`))
-            }, 30000)
-        })
-        
-        const toolPromise = client.callTool({
+        logStderr(t('cliAction.callingTool', { tool: toolName }))
+
+        const result = await postJsonRpc(serverUrl, 'tools/call', {
             name: toolName,
             arguments: args
         })
-        
-        const result = await Promise.race([toolPromise, timeoutPromise])
-        
-        // stdout에는 순수 JSON 결과만 출력
+
+        // Keep stdout as pure JSON.
         process.stdout.write(JSON.stringify(result, null, 2) + '\n')
     } catch (error: any) {
-        logStderr(`❌ 오류: ${error.message}`)
+        logStderr(t('cliAction.error', { error: error.message }))
         process.stdout.write(JSON.stringify({ error: error.message }, null, 2) + '\n')
         process.exit(1)
     } finally {
-        if (clientObj?.transport) {
-            await clientObj.transport.close()
-        }
         process.exit(0)
     }
 }
 
 export async function readResource(serverUrl: string, resourceUri: string) {
-    let clientObj
     try {
-        clientObj = await createClient(serverUrl)
-        const { client } = clientObj
+        logStderr(t('cliAction.readingResource', { uri: resourceUri }))
+
+        const result = await postJsonRpc(serverUrl, 'resources/read', {
+            uri: resourceUri
+        })
         
-        logStderr(`📖 리소스 읽기: ${resourceUri}`)
-        
-        const result = await client.readResource({ uri: resourceUri })
-        
-        // stdout에는 순수 JSON 결과만 출력
+        // Keep stdout as pure JSON.
         process.stdout.write(JSON.stringify(result, null, 2) + '\n')
     } catch (error: any) {
-        logStderr(`❌ 오류: ${error.message}`)
+        logStderr(t('cliAction.error', { error: error.message }))
         process.stdout.write(JSON.stringify({ error: error.message }, null, 2) + '\n')
         process.exit(1)
     } finally {
-        if (clientObj?.transport) {
-            await clientObj.transport.close()
-        }
         process.exit(0)
     }
 }

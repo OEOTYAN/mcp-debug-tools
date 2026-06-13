@@ -11,7 +11,17 @@ No stdio connection needed — use one-off CLI commands to control the full debu
 
 ## CLI Interface
 
-All commands use: `npx @uhd_kr/mcp-debug-tools <command> [args]`
+Prefer the local CLI bundled with the VS Code extension when available:
+
+```powershell
+node "$env:USERPROFILE\.vscode\extensions\oeotyan.mcp-debug-tools-*\out\cli.js" <command> [args]
+```
+
+You may also use the published package:
+
+```bash
+npx mcp-debug-tools <command> [args]
+```
 
 ### Local Path Fallback (When npx is unavailable)
 
@@ -19,20 +29,20 @@ If `npx` is unavailable (e.g., offline, network restrictions), you can run the C
 
 **macOS / Linux:**
 ```bash
-node ~/.vscode/extensions/uhd.mcp-debug-tools-*/out/cli.js <command> [args]
+node ~/.vscode/extensions/oeotyan.mcp-debug-tools-*/out/cli.js <command> [args]
 ```
 
 **Windows (PowerShell):**
 ```powershell
-node "$env:USERPROFILE\.vscode\extensions\uhd.mcp-debug-tools-*\out\cli.js" <command> [args]
+node "$env:USERPROFILE\.vscode\extensions\oeotyan.mcp-debug-tools-*\out\cli.js" <command> [args]
 ```
 
 **Windows (CMD):**
 ```cmd
-node "%USERPROFILE%\.vscode\extensions\uhd.mcp-debug-tools-*\out\cli.js" <command> [args]
+node "%USERPROFILE%\.vscode\extensions\oeotyan.mcp-debug-tools-*\out\cli.js" <command> [args]
 ```
 
-> **Tip**: If you installed mcp-debug-tools globally via `npm install -g @uhd_kr/mcp-debug-tools`, you can simply run `mcp-debug-tools <command>` directly without `npx`.
+> **Tip**: If you installed mcp-debug-tools globally via `npm install -g mcp-debug-tools`, you can simply run `mcp-debug-tools <command>` directly without `npx`.
 
 **Key Rules:**
 - `stdout` = pure JSON result. **Always parse stdout only.**
@@ -86,9 +96,12 @@ node "%USERPROFILE%\.vscode\extensions\uhd.mcp-debug-tools-*\out\cli.js" <comman
 |------|--------|-------------|
 | `get-call-stack` | `threadId?`, `startFrame?`, `levels?` | Get call stack frames |
 | `get-active-stack-item` | — | Get the currently active stack frame |
-| `get-variables-scope` | `frameId?`, `scopeName?` | Get all variables in scope |
-| `inspect-variable` | `variableName` | Get detailed info about a specific variable |
-| `evaluate-expression` | `expression` | Evaluate an expression in debug context |
+| `select-stack-frame` | `threadId?`, `frameId?`, `frameIndex?`, `revealSource?` | Select a stack frame in VS Code and reveal its source location |
+| `get-variables-scope` | `threadId?`, `frameId?`, `frameIndex?`, `scopeName?`, `includeRegisters?`, `depth?`, `maxChildren?` | Get variables for the active or specified frame, optionally expanded |
+| `get-stack-variables` | `threadId?`, `startFrame?`, `levels?`, `scopeName?`, `includeRegisters?`, `depth?`, `maxChildren?` | Get stack frames and variables for each frame in one request |
+| `expand-variable` | `variablesReference`, `depth?`, `maxChildren?` | Expand a DAP variable reference, optionally several levels deep |
+| `inspect-variable` | `variableName`, `frameId?`, `scopeName?`, `includeRegisters?`, `depth?`, `maxChildren?` | Get detailed info about a variable, optionally expanded |
+| `evaluate-expression` | `expression`, `frameId?`, `context?` | Evaluate an expression in debug context |
 | `get-thread-list` | — | List all threads |
 | `get-exception-info` | `limit?`, `includeStackTrace?` | Get recent exception details |
 | `get-debug-console` | `limit?`, `filter?` | Retrieve debug console output |
@@ -111,15 +124,22 @@ npx mcp-debug-tools call start-debug '{"config": "Launch Program"}'
 
 # Step and inspect
 npx mcp-debug-tools call step-over
+npx mcp-debug-tools call select-stack-frame '{"frameIndex": 1}'
 npx mcp-debug-tools call get-variables-scope
+npx mcp-debug-tools call get-variables-scope '{"frameIndex": 1, "depth": 2, "maxChildren": 50}'
+npx mcp-debug-tools call get-stack-variables '{"levels": 8, "depth": 1, "maxChildren": 50}'
+npx mcp-debug-tools call expand-variable '{"variablesReference": 42, "depth": 2}'
 npx mcp-debug-tools call inspect-variable '{"variableName": "result"}'
 
 # Evaluate an expression at current breakpoint
 npx mcp-debug-tools call evaluate-expression '{"expression": "arr.length"}'
 
 # Read resources directly
-npx mcp-debug-tools read "dap://log"
+npx mcp-debug-tools read "dap-log://current"
+npx mcp-debug-tools read "debug://active-session"
 ```
+
+After `select-stack-frame`, call `get-variables-scope` without a frame argument to inspect the frame selected in the VS Code UI. Pass `frameIndex` or `frameId` only when you want to inspect a different frame without changing the UI selection.
 
 ## Standard Debugging Workflow
 
@@ -128,6 +148,17 @@ npx mcp-debug-tools read "dap://log"
 3. **Set Breakpoints** → `add-breakpoint` or `add-breakpoints`
 4. **Start Debug** → `start-debug` with the config name
 5. **Analyze State** → `get-call-stack` + `get-variables-scope`
-6. **Inspect Details** → `inspect-variable` or `evaluate-expression`
+6. **Inspect Details** → `inspect-variable`, `expand-variable`, or `evaluate-expression`
 7. **Step Through** → `step-over` / `step-into` / `step-out`, repeat 5-6
 8. **Fix Code** → Edit source, then restart debugger to verify
+
+## C++ Notes
+
+For C++ sessions, register scopes are hidden by default to keep variable output readable. Pass `{"includeRegisters": true}` when register inspection is needed. Prefer bounded expansion such as `{"depth": 2, "maxChildren": 50}` for STL containers.
+
+## Clean Workspace Behavior
+
+The VS Code extension registers active debugger endpoints in a temp/global state file by default, so normal CLI discovery does not require writing `.mcp-debug-tools` files into the workspace. Workspace config and agent skill injection are opt-in via environment variables:
+
+- `MCP_DEBUG_TOOLS_WRITE_WORKSPACE_CONFIG=1`
+- `MCP_DEBUG_TOOLS_INJECT_WORKSPACE_SKILL=1`

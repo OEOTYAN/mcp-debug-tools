@@ -2,7 +2,8 @@ import * as vscode from 'vscode'
 import * as path from 'path'
 import * as fs from 'fs'
 import { state } from './state'
-import { WorkspaceConfig } from './config-manager'
+import { WorkspaceConfig } from './discovery'
+import { getLocale, t } from './i18n'
 
 /**
  * Create and show the monitoring panel
@@ -10,7 +11,7 @@ import { WorkspaceConfig } from './config-manager'
 export function createMonitoringPanel() {
     const panel = vscode.window.createWebviewPanel(
         'dapProxyMonitor',
-        'DAP Proxy Monitor',
+        t('monitor.title'),
         vscode.ViewColumn.One,
         {
             enableScripts: true,
@@ -59,6 +60,7 @@ export function updateAllPanels() {
  */
 function updatePanel(panel: vscode.WebviewPanel) {
     if (panel.webview) {
+        panel.title = t('monitor.title')
         panel.webview.html = getWebviewContent()
     }
 }
@@ -72,9 +74,13 @@ function getServerStatus() {
         host: 'localhost',
         port: state.currentPort,
         fullUrl: state.currentPort ? `http://localhost:${state.currentPort}` : null,
-        startTime: state.serverStartTime?.toLocaleString('en-US'),
+        startTime: state.serverStartTime?.toLocaleString(getDateLocale()),
         uptime: state.getUptime()
     }
+}
+
+function getDateLocale(): string {
+    return getLocale() === 'zh' ? 'zh-CN' : 'en-US'
 }
 
 /**
@@ -97,7 +103,7 @@ function getWorkspaceConfigStatus(): { exists: boolean; config?: WorkspaceConfig
         
         return { exists: false, path: configPath }
     } catch (error) {
-        console.error('Error reading workspace config:', error)
+        console.error(t('monitor.configReadFailed', { error }))
         return { exists: false }
     }
 }
@@ -107,7 +113,7 @@ function getWorkspaceConfigStatus(): { exists: boolean; config?: WorkspaceConfig
  */
 function generateMcpConfig(): string {
     if (!state.currentPort) {
-        return 'MCP server has not started yet.'
+        return t('monitor.noServerConfig')
     }
     
     const config = {
@@ -132,7 +138,7 @@ function generateMcpConfig(): string {
 function copyMcpConfigToClipboard() {
     const config = generateMcpConfig()
     vscode.env.clipboard.writeText(config).then(() => {
-        vscode.window.showInformationMessage('MCP configuration has been copied to clipboard!')
+        vscode.window.showInformationMessage(t('monitor.configCopied'))
     })
 }
 
@@ -149,30 +155,30 @@ function getWebviewContent(): string {
     if (configStatus.exists && configStatus.config) {
         configInfo = `
             <div class="info-grid">
-                <span class="info-label">Config Path:</span>
+                <span class="info-label">${t('monitor.configPath')}</span>
                 <span style="font-size: 11px;">${configStatus.path}</span>
                 
-                <span class="info-label">Workspace:</span>
+                <span class="info-label">${t('monitor.workspace')}</span>
                 <span>${configStatus.config.workspaceName}</span>
                 
-                <span class="info-label">Instance ID:</span>
+                <span class="info-label">${t('monitor.instanceId')}</span>
                 <span style="font-size: 11px;">${configStatus.config.vscodeInstanceId}</span>
                 
-                <span class="info-label">PID:</span>
+                <span class="info-label">${t('monitor.pid')}</span>
                 <span>${configStatus.config.pid}</span>
             </div>
         `
     } else {
-        configInfo = '<p>No workspace configuration file found.</p>'
+        configInfo = `<p>${t('monitor.noWorkspaceConfig')}</p>`
     }
     
     return `
         <!DOCTYPE html>
-        <html lang="en">
+        <html lang="${getLocale() === 'zh' ? 'zh-CN' : 'en'}">
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>DAP Proxy Monitor</title>
+            <title>${t('monitor.title')}</title>
             <style>
                 body {
                     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -279,65 +285,65 @@ function getWebviewContent(): string {
             </style>
         </head>
         <body>
-            <h1>🔍 DAP Proxy Monitor 
-                <button class="button refresh-btn" onclick="refresh()">🔄 Refresh</button>
+            <h1>🔍 ${t('monitor.title')}
+                <button class="button refresh-btn" onclick="refresh()">🔄 ${t('monitor.refresh')}</button>
             </h1>
             
             <div class="beta-notice">
-                <strong>⚠️ Beta Testing Notice</strong><br>
-                This program is currently in beta testing phase. Please report any issues or provide feedback.
+                <strong>⚠️ ${t('monitor.betaNoticeTitle')}</strong><br>
+                ${t('monitor.betaNoticeBody')}
             </div>
             
-            <h2>📊 MCP Server Status</h2>
+            <h2>📊 ${t('monitor.serverStatus')}</h2>
             <div>
                 <span class="status-indicator ${serverStatus.isRunning ? 'status-running' : 'status-stopped'}"></span>
-                <strong>${serverStatus.isRunning ? '🟢 Running' : '🔴 Stopped'}</strong>
+                <strong>${serverStatus.isRunning ? `🟢 ${t('monitor.running')}` : `🔴 ${t('monitor.stopped')}`}</strong>
                 
-                <!-- 서버 제어 버튼 추가 -->
+                <!-- Server control buttons -->
                 <div style="margin-top: 15px;">
                     ${serverStatus.isRunning ?
-                        '<button class="button" onclick="stopServer()" style="background-color: #f44336;">🛑 Stop Server</button>' :
-                        '<button class="button" onclick="startServer()" style="background-color: #4CAF50;">▶️ Start Server</button>'
+                        `<button class="button" onclick="stopServer()" style="background-color: #f44336;">🛑 ${t('monitor.stopServer')}</button>` :
+                        `<button class="button" onclick="startServer()" style="background-color: #4CAF50;">▶️ ${t('monitor.startServer')}</button>`
                     }
                 </div>
             </div>
             
             <div class="info-grid">
-                <span class="info-label">Host:</span>
+                <span class="info-label">${t('monitor.host')}</span>
                 <span>${serverStatus.host}</span>
                 
-                <span class="info-label">Port:</span>
-                <span>${serverStatus.port || 'Unknown'}</span>
+                <span class="info-label">${t('monitor.port')}</span>
+                <span>${serverStatus.port || t('monitor.unknown')}</span>
                 
-                <span class="info-label">Server URL:</span>
-                <span>${serverStatus.fullUrl || 'Not available'}</span>
+                <span class="info-label">${t('monitor.serverUrl')}</span>
+                <span>${serverStatus.fullUrl || t('monitor.notAvailable')}</span>
                 
-                <span class="info-label">Start Time:</span>
-                <span>${serverStatus.startTime || 'Unknown'}</span>
+                <span class="info-label">${t('monitor.startTime')}</span>
+                <span>${serverStatus.startTime || t('monitor.unknown')}</span>
                 
-                <span class="info-label">Uptime:</span>
-                <span>${serverStatus.uptime || 'Unknown'}</span>
+                <span class="info-label">${t('monitor.uptime')}</span>
+                <span>${serverStatus.uptime || t('monitor.unknown')}</span>
             </div>
             
             <div class="section-divider"></div>
             
-            <h2>📁 Workspace Configuration</h2>
+            <h2>📁 ${t('monitor.workspaceConfig')}</h2>
             ${configInfo}
             
             <div class="warning-box">
-                <strong>⚠️ Current Limitations</strong><br>
-                • Only one debugging session per server is supported<br>
-                • For multiple simultaneous debugging sessions, you need to change the port in MCP configuration
+                <strong>⚠️ ${t('monitor.currentLimitations')}</strong><br>
+                • ${t('monitor.limitationSingleSession')}<br>
+                • ${t('monitor.limitationMultipleSessions')}
             </div>
             
-            <h2>🔧 Multiple Debugging Sessions</h2>
-            <p>To run multiple debugging sessions simultaneously, modify your MCP configuration with different ports:</p>
+            <h2>🔧 ${t('monitor.multipleSessions')}</h2>
+            <p>${t('monitor.multipleSessionsHelp')}</p>
             <div class="code-block">{
   "mcpServers": {
     "dap-proxy": {
       "command": "node",
       "args": [
-        "/Users/uhd/Projects/mcp-dap-vscode/Package/mcp-debug-tools/out/cli.js",
+        "/path/to/mcp-debug-tools/out/cli.js",
         "--port=8890"
       ]
     }
@@ -345,21 +351,14 @@ function getWebviewContent(): string {
 }</div>
             
             <div class="section-divider"></div>
-            
-            <h2>📧 Feedback</h2>
+            <h2>🚀 ${t('monitor.upcomingFeatures')}</h2>
             <div class="info-box">
-                <p>We welcome your feedback and suggestions for improvement!</p>
-                <p><strong>Contact:</strong> <a href="mailto:yoo.hwanyong@gmail.com" class="email-link">yoo.hwanyong@gmail.com</a></p>
-            </div>
-            
-            <h2>🚀 Upcoming Features</h2>
-            <div class="info-box">
-                <p><strong>Features currently under development:</strong></p>
+                <p><strong>${t('monitor.featuresIntro')}</strong></p>
                 <ul class="feature-list">
-                    <li><strong>Multi-Session Support:</strong> Support for multiple debugging sessions on a single server - This will allow you to debug multiple applications simultaneously without needing separate MCP configurations.</li>
-                    <li><strong>Customizable Data Structures:</strong> Unified tool integration to reduce frequent tool calls - This feature will consolidate multiple tools into one, optimizing performance and reducing the overhead of multiple tool invocations.</li>
+                    <li><strong>${t('monitor.featureMultiSessionTitle')}</strong> ${t('monitor.featureMultiSessionBody')}</li>
+                    <li><strong>${t('monitor.featureDataStructuresTitle')}</strong> ${t('monitor.featureDataStructuresBody')}</li>
                 </ul>
-                <p><em>These features are expected to significantly improve the debugging experience and tool efficiency.</em></p>
+                <p><em>${t('monitor.featuresOutro')}</em></p>
             </div>
             
             <script>

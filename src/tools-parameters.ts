@@ -28,29 +28,36 @@ export const inputSchemas = {
         config: z.string().describe('Configuration name from launch.json')
     },
     'evaluate-expression': {
-        expression: z.string().describe('Expression to evaluate in debug context')
+        expression: z.string().describe('Expression to evaluate in debug context'),
+        frameId: z.number().optional().describe('Specific stack frame ID to evaluate against'),
+        context: z.enum(['watch', 'repl', 'hover', 'clipboard', 'variables']).optional().describe('DAP evaluate context')
     },
     'inspect-variable': {
-        variableName: z.string().describe('Name of the variable to inspect')
+        variableName: z.string().describe('Name of the variable to inspect'),
+        frameId: z.number().optional().describe('Specific stack frame ID to inspect against'),
+        scopeName: z.string().optional().describe('Filter by scope name'),
+        includeRegisters: z.boolean().optional().describe('Include register scopes when searching variables'),
+        depth: z.number().int().min(0).optional().describe('Child expansion depth'),
+        maxChildren: z.number().int().min(1).optional().describe('Maximum children to fetch per expanded variable')
     },
     'list-debug-configs': {
-        // 파라미터 없음
+        // No parameters
     },
     'select-debug-config': {
         configName: z.string().describe('Debug configuration name to select')
     },
     
-    // 새로운 도구 스키마들
+    // Additional tool schemas
     'get-dap-log': {
-        // 파라미터 없음 - 모든 DAP 로그 반환
+        // No parameters - returns all DAP logs
     },
     
     'get-breakpoints': {
-        // 파라미터 없음 - 모든 브레이크포인트 반환
+        // No parameters - returns all breakpoints
     },
     
     'get-active-session': {
-        // 파라미터 없음 - 활성 세션 정보 반환
+        // No parameters - returns active session info
     },
     
     'get-debug-console': {
@@ -59,7 +66,7 @@ export const inputSchemas = {
     },
     
     'get-active-stack-item': {
-        // 파라미터 없음 - 현재 활성 스택 아이템 반환
+        // No parameters - returns the current active stack item
     },
     
     'get-call-stack': {
@@ -67,14 +74,42 @@ export const inputSchemas = {
         startFrame: z.number().optional().describe('Start frame index'),
         levels: z.number().optional().describe('Number of frames to retrieve')
     },
+
+    'select-stack-frame': {
+        threadId: z.number().optional().describe('Specific thread ID'),
+        frameId: z.number().optional().describe('Specific frame ID'),
+        frameIndex: z.number().int().min(0).optional().describe('Stack frame index within the thread when frameId is omitted'),
+        revealSource: z.boolean().optional().describe('Open and reveal the frame source location in the editor')
+    },
     
     'get-variables-scope': {
+        threadId: z.number().optional().describe('Specific thread ID; used to pick a frame when frameId is omitted'),
         frameId: z.number().optional().describe('Specific frame ID'),
-        scopeName: z.string().optional().describe('Filter by scope name')
+        frameIndex: z.number().int().min(0).optional().describe('Stack frame index within the thread when frameId is omitted; defaults to the current VS Code active frame'),
+        scopeName: z.string().optional().describe('Filter by scope name'),
+        includeRegisters: z.boolean().optional().describe('Include CPU register scopes in the result'),
+        depth: z.number().int().min(0).optional().describe('Child expansion depth'),
+        maxChildren: z.number().int().min(1).optional().describe('Maximum children to fetch per scope or expanded variable')
+    },
+
+    'get-stack-variables': {
+        threadId: z.number().optional().describe('Specific thread ID'),
+        startFrame: z.number().int().min(0).optional().describe('Start frame index'),
+        levels: z.number().int().min(1).optional().describe('Number of stack frames to retrieve'),
+        scopeName: z.string().optional().describe('Filter by scope name'),
+        includeRegisters: z.boolean().optional().describe('Include CPU register scopes in the result'),
+        depth: z.number().int().min(0).optional().describe('Child expansion depth'),
+        maxChildren: z.number().int().min(1).optional().describe('Maximum children to fetch per scope or expanded variable')
+    },
+
+    'expand-variable': {
+        variablesReference: z.number().int().min(1).describe('DAP variablesReference to expand'),
+        depth: z.number().int().min(0).optional().describe('Child expansion depth'),
+        maxChildren: z.number().int().min(1).optional().describe('Maximum children to fetch per expanded variable')
     },
     
     'get-thread-list': {
-        // 파라미터 없음 - 모든 스레드 목록 반환
+        // No parameters - returns all threads
     },
     
     'get-exception-info': {
@@ -82,17 +117,17 @@ export const inputSchemas = {
         includeStackTrace: z.boolean().optional().describe('Include stack trace information')
     },
     
-    // 새로운 Workspace 관련 도구
+    // Additional workspace-related tools
     'select-vscode-instance': {
         port: z.number().optional().describe('Specific VSCode instance port'),
         workspace: z.string().optional().describe('Workspace path to select')
     },
     
     'get-workspace-info': {
-        // 파라미터 없음 - 현재 workspace 정보 반환
+        // No parameters - returns current workspace info
     },
     
     'list-vscode-instances': {
-        // 파라미터 없음 - 모든 활성 VSCode 인스턴스 목록
+        // No parameters - returns all active VS Code instances
     }
 }
