@@ -115,10 +115,11 @@ export async function callTool(serverUrl: string, toolName: string, argsStr?: st
 
         logStderr(t('cliAction.callingTool', { tool: toolName }))
 
+        const timeoutMs = toolName === 'start-debug' ? 120000 : 30000
         const result = await postJsonRpc(serverUrl, 'tools/call', {
             name: toolName,
             arguments: args
-        })
+        }, timeoutMs)
 
         // Keep stdout as pure JSON.
         process.stdout.write(JSON.stringify(result, null, 2) + '\n')

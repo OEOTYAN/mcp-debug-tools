@@ -35,13 +35,13 @@ npx mcp-debug-tools call step-over
 
 ## 🚀 What's New in v1.0.0
 
-### 🤖 AI Agent Skill Auto-Injection
-The extension now **automatically injects skill documents** into your workspace when activated, so AI agents can discover and use debugging tools **without any manual configuration**.
+### 🤖 AI Agent Skill Support
+The extension ships a reusable debugging skill document and can inject it into a workspace when requested.
 
-| AI Platform | Auto-detected Path | Status |
-|-------------|-------------------|--------|
-| **Gemini** (Google) | `.gemini/skills/dap-cli-debugging/SKILL.md` | ✅ Supported |
-| **Claude Code** (Anthropic) | `.claude/skills/dap-cli-debugging/SKILL.md` | ✅ Supported |
+| AI Platform | Workspace Path | Default |
+|-------------|----------------|---------|
+| **Gemini** (Google) | `.gemini/skills/dap-cli-debugging/SKILL.md` | Opt-in |
+| **Claude Code** (Anthropic) | `.claude/skills/dap-cli-debugging/SKILL.md` | Opt-in |
 
 ### 🔌 Offline CLI Support
 Run the CLI directly from the VS Code extension's install path — **no internet or npx required**.
@@ -55,7 +55,7 @@ node "$env:USERPROFILE\.vscode\extensions\oeotyan.mcp-debug-tools-*\out\cli.js" 
 ```
 
 ### 📖 Comprehensive Tool Documentation
-All **29 debugging tools** are now fully documented in the auto-injected skill file, organized by category with parameters and usage examples.
+All debugging tools are documented in the bundled skill/reference files, organized by category with parameters and usage examples.
 
 ## 🎯 Key Features
 
@@ -68,7 +68,7 @@ All **29 debugging tools** are now fully documented in the auto-injected skill f
 ### Auto-Connection System
 - Automatic VSCode instance discovery and connection
 - Multiple VSCode windows support
-- Workspace-based configuration management
+- Temp/global registry-based instance discovery by default
 - Real-time heartbeat monitoring
 
 ## 📦 Installation
@@ -129,6 +129,8 @@ npx mcp-debug-tools --port=8891
 # Disable auto-discovery
 npx mcp-debug-tools --no-auto
 ```
+
+`start-debug` can take longer than other commands when the selected launch configuration runs build steps or other `preLaunchTask` work before the debugger attaches.
 
 ### Local Path Fallback (When npx is unavailable)
 
@@ -209,10 +211,19 @@ node "%USERPROFILE%\.vscode\extensions\oeotyan.mcp-debug-tools-*\out\cli.js" <co
 
 ### Auto-Connection Mechanism
 
-1. **Workspace Config**: `.mcp-debug-tools/config.json` - Stores VSCode connection info
-2. **Global Registry**: `~/.mcp-debug-tools/active-configs.json` - Tracks all active instances
+1. **Temp Registry**: OS temp directory `mcp-debug-tools/active-configs.json` tracks active instances by default
+2. **Workspace Config (optional)**: `.mcp-debug-tools/config.json` is written only when explicitly enabled
 3. **Heartbeat**: 5-second interval liveness updates
 4. **PID Verification**: Process status checking
+
+### Optional Workspace Files
+
+Workspace file writes are disabled by default. Enable them only when you want explicit per-workspace artifacts:
+
+```bash
+MCP_DEBUG_TOOLS_WRITE_WORKSPACE_CONFIG=1
+MCP_DEBUG_TOOLS_INJECT_WORKSPACE_SKILL=1
+```
 
 ## 🚀 Getting Started
 
@@ -373,8 +384,9 @@ For the complete rules and patterns, see [`MCP_DEBUG_TOOLS_RULES.md`](./MCP_DEBU
 
 ### CLI Can't Find VSCode
 1. Verify VSCode Extension is active
-2. Check `.mcp-debug-tools/config.json` exists
+2. Run `list-vscode-instances` to confirm the extension registered the current window
 3. Try manual connection with `--port` option
+4. Enable `.mcp-debug-tools/config.json` only if your workflow specifically needs workspace-local discovery artifacts
 
 ### Multiple VSCode Windows
 - CLI auto-selects based on current directory

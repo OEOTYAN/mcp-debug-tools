@@ -233,6 +233,36 @@ function sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms))
 }
 
+async function waitForDebugSession(
+    predicate: (session: vscode.DebugSession) => boolean,
+    timeoutMs = 45000
+): Promise<vscode.DebugSession | undefined> {
+    const existing = vscode.debug.activeDebugSession
+    if (existing && predicate(existing)) {
+        return existing
+    }
+
+    return await new Promise(resolve => {
+        let settled = false
+        const timeout = setTimeout(() => {
+            if (!settled) {
+                settled = true
+                disposable.dispose()
+                resolve(undefined)
+            }
+        }, timeoutMs)
+
+        const disposable = vscode.debug.onDidStartDebugSession(session => {
+            if (!settled && predicate(session)) {
+                settled = true
+                clearTimeout(timeout)
+                disposable.dispose()
+                resolve(session)
+            }
+        })
+    })
+}
+
 async function revealFrameSource(frame: any): Promise<any> {
     if (!frame?.source?.path || frame.line === undefined || frame.line <= 0) {
         return {
@@ -547,9 +577,51 @@ export const startDebugTool = {
             if (!folder) {
                 return asTextContent(t('tools.noWorkspaceFolder'), true)
             }
-            
-            const success = await vscode.debug.startDebugging(folder, config)
-            return asTextContent(success ? t('tools.debugStarted', { config }) : t('tools.debugStartFailed'))
+
+            try {
+                const success = await vscode.debug.startDebugging(folder, config)
+                const session = await waitForDebugSession(
+                    started => started.name === config && started.workspaceFolder?.uri.fsPath === folder.uri.fsPath,
+                    5000
+                )
+
+                return asJsonContent({
+                    requestedConfig: config,
+                    started: success || !!session,
+                    acknowledgedByVsCode: success,
+                    sessionStarted: !!session,
+                    session: session ? {
+                        id: session.id,
+                        name: session.name,
+                        type: session.type,
+                        workspaceFolder: session.workspaceFolder?.name
+                    } : null,
+                    message: success || session ? t('tools.debugStarted', { config }) : t('tools.debugStartFailed')
+                })
+            } catch (error: any) {
+                const session = await waitForDebugSession(
+                    started => started.name === config && started.workspaceFolder?.uri.fsPath === folder.uri.fsPath
+                )
+
+                if (session) {
+                    return asJsonContent({
+                        requestedConfig: config,
+                        started: true,
+                        acknowledgedByVsCode: false,
+                        sessionStarted: true,
+                        session: {
+                            id: session.id,
+                            name: session.name,
+                            type: session.type,
+                            workspaceFolder: session.workspaceFolder?.name
+                        },
+                        warning: error?.message || String(error),
+                        message: t('tools.debugStarted', { config })
+                    })
+                }
+
+                throw error
+            }
         } catch (error: any) {
             return asErrorContent(error)
         }
@@ -1495,7 +1567,18 @@ export const selectStackFrameTool = {
                 commandErrors.push('VS Code did not expose a command path that changed debug.activeStackItem to the target frame')
             }
 
-            const sourceReveal = revealSource ? await revealFrameSource(targetFrame) : undefined
+            let sourceReveal
+            if (revealSource) {
+                try {
+                    sourceReveal = await revealFrameSource(targetFrame)
+                } catch (error: any) {
+                    sourceReveal = {
+                        revealed: false,
+                        error: error?.message || String(error)
+                    }
+                    commandErrors.push(`source reveal: ${error?.message || String(error)}`)
+                }
+            }
             after = summarizeActiveStackItem()
 
             return asJsonContent({

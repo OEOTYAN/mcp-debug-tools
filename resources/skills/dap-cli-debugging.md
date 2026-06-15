@@ -152,6 +152,8 @@ After `select-stack-frame`, call `get-variables-scope` without a frame argument 
 7. **Step Through** → `step-over` / `step-into` / `step-out`, repeat 5-6
 8. **Fix Code** → Edit source, then restart debugger to verify
 
+`start-debug` may legitimately take longer than simple inspection tools when the launch configuration runs build steps or other `preLaunchTask` work first. Treat that as in-progress unless the session still has not appeared after a reasonable wait.
+
 ## C++ Notes
 
 For C++ sessions, register scopes are hidden by default to keep variable output readable. Pass `{"includeRegisters": true}` when register inspection is needed. Prefer bounded expansion such as `{"depth": 2, "maxChildren": 50}` for STL containers.
