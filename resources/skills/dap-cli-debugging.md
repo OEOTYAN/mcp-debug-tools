@@ -66,7 +66,7 @@ node "%USERPROFILE%\.vscode\extensions\oeotyan.mcp-debug-tools-*\out\cli.js" <co
 | `get-debug-state` | — | Get full debug state: session + all breakpoints |
 | `list-debug-configs` | — | List all configurations from launch.json |
 | `select-debug-config` | `configName` | Select a specific debug configuration by name |
-| `start-debug` | `config` (name from launch.json) | Start a debug session |
+| `start-debug` | `config`, `inputs?`, `inputValues?` | Start a debug session, optionally supplying `${input:...}` values |
 | `stop-debug` | — | Stop the active debug session |
 | `get-workspace-info` | — | Get current workspace information |
 | `list-vscode-instances` | — | List all active VS Code instances |
@@ -122,6 +122,9 @@ npx mcp-debug-tools call add-breakpoints '{"breakpoints": [{"file": "src/app.ts"
 # Start debugging with a named config
 npx mcp-debug-tools call start-debug '{"config": "Launch Program"}'
 
+# Start debugging with a launch/task input value
+npx mcp-debug-tools call start-debug '{"config": "Debug Scenario", "inputs": {"scenario": "examples/advanced"}}'
+
 # Step and inspect
 npx mcp-debug-tools call step-over
 npx mcp-debug-tools call select-stack-frame '{"frameIndex": 1}'
@@ -153,6 +156,8 @@ After `select-stack-frame`, call `get-variables-scope` without a frame argument 
 8. **Fix Code** → Edit source, then restart debugger to verify
 
 `start-debug` may legitimately take longer than simple inspection tools when the launch configuration runs build steps or other `preLaunchTask` work first. Treat that as in-progress unless the session still has not appeared after a reasonable wait.
+
+If a debug configuration or its `preLaunchTask` dependency chain uses `${input:...}`, call `list-debug-configs` first. It reports `inputReferences`, relevant task labels, and defaults. Pass explicit values to `start-debug` as `{"inputs":{"inputId":"value"}}` to avoid VS Code waiting on an interactive prompt.
 
 ## C++ Notes
 

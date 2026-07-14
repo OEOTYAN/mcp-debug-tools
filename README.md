@@ -2,7 +2,6 @@
 
 > **The bridge between AI Agents and VS Code Debugger** — Let your AI assistant set breakpoints, step through code, and inspect variables in real-time.
 
-[![VS Code Marketplace](https://img.shields.io/badge/VS%20Code-Marketplace-blue)](https://marketplace.visualstudio.com/items?itemName=oeotyan.mcp-debug-tools)
 [![npm](https://img.shields.io/npm/v/mcp-debug-tools)](https://www.npmjs.com/package/mcp-debug-tools)
 
 ## Why MCP Debug Tools?
@@ -77,18 +76,13 @@ All debugging tools are documented in the bundled skill/reference files, organiz
 
 Provides debugging capabilities as a server in VSCode.
 
-**Method 1: VSCode Marketplace**
-```
-1. Open VSCode Extensions tab (Ctrl+Shift+X)
-2. Search for "MCP Debug Tools"
-3. Click Install
+Install the prebuilt VSIX from this repository:
+
+```bash
+code --install-extension ./vsix/mcp-debug-tools-1.0.2.vsix
 ```
 
-**Method 2: Direct Link**
-- [MCP Debug Tools on VSCode Marketplace](https://marketplace.visualstudio.com/items?itemName=oeotyan.mcp-debug-tools)
-
-**Method 3: Download Link**
-- [Releases](https://github.com/OEOTYAN/mcp-debug-tools/releases)
+If the `code` command is not on your PATH, use VSCode's **Extensions: Install from VSIX...** command and select the file under `vsix/`.
 
 ### 2. CLI Tool
 
@@ -131,6 +125,68 @@ npx mcp-debug-tools --no-auto
 ```
 
 `start-debug` can take longer than other commands when the selected launch configuration runs build steps or other `preLaunchTask` work before the debugger attaches.
+
+### Launch Inputs
+
+`start-debug` can provide values for `${input:...}` variables in `launch.json` and in the selected configuration's `preLaunchTask` chain from `tasks.json`. This avoids VSCode waiting on an interactive prompt during AI-driven debugging.
+
+Example `launch.json`:
+
+```jsonc
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug Scenario",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/app.js",
+      "args": ["--scenario", "${input:scenario}"],
+      "preLaunchTask": "prepare selected scenario"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "scenario",
+      "type": "promptString",
+      "description": "Scenario name",
+      "default": "examples/basic"
+    }
+  ]
+}
+```
+
+Example `tasks.json`:
+
+```jsonc
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "prepare selected scenario",
+      "type": "shell",
+      "command": "npm run prepare -- --scenario \"${input:scenario}\"",
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "scenario",
+      "type": "promptString",
+      "description": "Scenario name",
+      "default": "examples/basic"
+    }
+  ]
+}
+```
+
+Start debugging with an explicit input value:
+
+```bash
+npx mcp-debug-tools call start-debug '{"config":"Debug Scenario","inputs":{"scenario":"examples/advanced"}}'
+```
+
+`list-debug-configs` reports `inputReferences` and the relevant `preLaunchTask` labels so an agent can discover which values are needed before calling `start-debug`.
 
 ### Local Path Fallback (When npx is unavailable)
 
