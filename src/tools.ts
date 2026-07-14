@@ -18,13 +18,42 @@ import {
 const DEFAULT_MAX_CHILDREN = 100
 const DEFAULT_EXPAND_DEPTH = 0
 const REGISTER_SCOPE_NAMES = new Set(['Registers', 'CPU Registers'])
+const INPUT_VARIABLE_PATTERN = /\$\{input:([^}]+)\}/g
 
-function asJsonContent(value: unknown) {
+type LaunchInputValue = string | number | boolean
+
+interface LaunchInputDefinition {
+    id?: string
+    type?: string
+    description?: string
+    default?: unknown
+    options?: unknown[]
+    command?: string
+    args?: unknown
+    password?: boolean
+}
+
+interface InputResolutionSummary {
+    id: string
+    type: string
+    source: 'provided' | 'default' | 'option'
+    value: string
+}
+
+interface MissingLaunchInput {
+    id: string
+    type: string
+    description?: string
+    reason: string
+}
+
+function asJsonContent(value: unknown, isError = false) {
     return {
         content: [{
             type: 'text' as const,
             text: JSON.stringify(value, null, 2)
-        }]
+        }],
+        ...(isError ? { isError: true } : {})
     }
 }
 
@@ -40,6 +69,327 @@ function asTextContent(text: string, isError = false) {
 
 function asErrorContent(error: any) {
     return asTextContent(t('tools.error', { error: error?.message || error }), true)
+}
+
+function collectInputReferences(value: unknown, references = new Set<string>()): Set<string> {
+    if (typeof value === 'string') {
+        for (const match of value.matchAll(INPUT_VARIABLE_PATTERN)) {
+            references.add(match[1])
+        }
+        return references
+    }
+
+    if (Array.isArray(value)) {
+        for (const item of value) {
+            collectInputReferences(item, references)
+        }
+        return references
+    }
+
+    if (value && typeof value === 'object') {
+        for (const item of Object.values(value as Record<string, unknown>)) {
+            collectInputReferences(item, references)
+        }
+    }
+
+    return references
+}
+
+interface TaskInputReferenceSummary {
+    labels: string[]
+    missingLabels: string[]
+    inputReferences: string[]
+}
+
+function getLaunchInputsById(...jsonDocuments: any[]): Map<string, LaunchInputDefinition> {
+    const inputs = new Map<string, LaunchInputDefinition>()
+
+    for (const jsonDocument of jsonDocuments) {
+        if (!Array.isArray(jsonDocument?.inputs)) {
+            continue
+        }
+
+        for (const input of jsonDocument.inputs) {
+            if (input && typeof input === 'object' && typeof input.id === 'string') {
+                inputs.set(input.id, input)
+            }
+        }
+    }
+
+    return inputs
+}
+
+function summarizeLaunchInput(input: LaunchInputDefinition | undefined, id?: string) {
+    if (!input) {
+        return {
+            id: id || 'unknown',
+            type: 'unknown',
+            missingDefinition: true
+        }
+    }
+
+    const summary: Record<string, unknown> = {
+        id: input.id,
+        type: input.type || 'unknown',
+        description: input.description,
+        hasDefault: input.default !== undefined,
+        options: input.options
+    }
+
+    if (!input.password && input.default !== undefined) {
+        summary.default = input.default
+    }
+
+    if (input.command) {
+        summary.command = input.command
+    }
+
+    if (input.password) {
+        summary.password = true
+    }
+
+    return summary
+}
+
+function summarizeDebugConfig(
+    config: any,
+    index: number,
+    launchInputsById: Map<string, LaunchInputDefinition>,
+    taskInputReferences?: TaskInputReferenceSummary
+) {
+    const launchInputReferences = Array.from(collectInputReferences(config))
+    const taskReferences = taskInputReferences || {
+        labels: [],
+        missingLabels: [],
+        inputReferences: []
+    }
+    const inputReferences = Array.from(new Set([
+        ...launchInputReferences,
+        ...taskReferences.inputReferences
+    ]))
+
+    return {
+        name: config.name || `Configuration ${index + 1}`,
+        type: config.type || 'unknown',
+        request: config.request || 'unknown',
+        program: config.program || config.args?.[0] || 'not specified',
+        cwd: config.cwd || 'not specified',
+        env: config.env || {},
+        args: config.args || [],
+        inputReferences,
+        launchInputReferences,
+        taskInputReferences: taskReferences,
+        inputs: inputReferences.map(id => summarizeLaunchInput(launchInputsById.get(id), id))
+    }
+}
+
+function getTaskReferenceLabels(reference: unknown): string[] {
+    if (typeof reference === 'string') {
+        return [reference]
+    }
+
+    if (Array.isArray(reference)) {
+        return reference.flatMap(item => getTaskReferenceLabels(item))
+    }
+
+    if (reference && typeof reference === 'object') {
+        const record = reference as Record<string, unknown>
+        if (typeof record.label === 'string') {
+            return [record.label]
+        }
+        if (typeof record.task === 'string') {
+            return [record.task]
+        }
+    }
+
+    return []
+}
+
+function collectTaskInputReferences(tasksJson: any, rootReference: unknown): TaskInputReferenceSummary {
+    const tasks = Array.isArray(tasksJson?.tasks) ? tasksJson.tasks : []
+    const tasksByLabel = new Map<string, any>()
+
+    for (const task of tasks) {
+        if (task && typeof task === 'object' && typeof task.label === 'string') {
+            tasksByLabel.set(task.label, task)
+        }
+    }
+
+    const labels: string[] = []
+    const missingLabels: string[] = []
+    const seenLabels = new Set<string>()
+
+    function visit(reference: unknown) {
+        for (const label of getTaskReferenceLabels(reference)) {
+            if (seenLabels.has(label)) {
+                continue
+            }
+
+            seenLabels.add(label)
+            const task = tasksByLabel.get(label)
+            if (!task) {
+                missingLabels.push(label)
+                continue
+            }
+
+            labels.push(label)
+            visit(task.dependsOn)
+        }
+    }
+
+    visit(rootReference)
+
+    const inputReferences = new Set<string>()
+    for (const label of labels) {
+        const task = tasksByLabel.get(label)
+        collectInputReferences(task, inputReferences)
+    }
+
+    return {
+        labels,
+        missingLabels,
+        inputReferences: Array.from(inputReferences)
+    }
+}
+
+function normalizeInputValues(args: any): Record<string, LaunchInputValue> {
+    const inputValues: Record<string, LaunchInputValue> = {}
+
+    for (const values of [args?.inputs, args?.inputValues]) {
+        if (!values || typeof values !== 'object' || Array.isArray(values)) {
+            continue
+        }
+
+        for (const [id, value] of Object.entries(values)) {
+            if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+                inputValues[id] = value
+            }
+        }
+    }
+
+    return inputValues
+}
+
+function stringifyLaunchInputValue(value: unknown): string {
+    if (typeof value === 'string') {
+        return value
+    }
+
+    if (typeof value === 'number' || typeof value === 'boolean') {
+        return String(value)
+    }
+
+    if (value === null || value === undefined) {
+        return ''
+    }
+
+    return JSON.stringify(value)
+}
+
+function getPickStringOptionValue(option: unknown): unknown {
+    if (option && typeof option === 'object') {
+        const optionRecord = option as Record<string, unknown>
+        return optionRecord.value ?? optionRecord.label
+    }
+
+    return option
+}
+
+function resolveLaunchInputs(
+    inputReferences: string[],
+    launchInputsById: Map<string, LaunchInputDefinition>,
+    providedInputValues: Record<string, LaunchInputValue>
+) {
+    const resolvedInputValues = new Map<string, string>()
+    const resolvedInputs: InputResolutionSummary[] = []
+    const missingInputs: MissingLaunchInput[] = []
+
+    for (const id of inputReferences) {
+        const input = launchInputsById.get(id)
+        let value: unknown
+        let source: InputResolutionSummary['source'] | undefined
+
+        if (Object.prototype.hasOwnProperty.call(providedInputValues, id)) {
+            value = providedInputValues[id]
+            source = 'provided'
+        } else if (input?.default !== undefined) {
+            value = input.default
+            source = 'default'
+        } else if (input?.type === 'pickString' && Array.isArray(input.options) && input.options.length > 0) {
+            value = getPickStringOptionValue(input.options[0])
+            source = 'option'
+        }
+
+        if (source !== undefined) {
+            const stringValue = stringifyLaunchInputValue(value)
+            resolvedInputValues.set(id, stringValue)
+            resolvedInputs.push({
+                id,
+                type: input?.type || 'unknown',
+                source,
+                value: input?.password ? '<redacted>' : stringValue
+            })
+            continue
+        }
+
+        missingInputs.push({
+            id,
+            type: input?.type || 'unknown',
+            description: input?.description,
+            reason: input ?
+                'No value was provided and the launch input has no default value.' :
+                'The configuration references this input id, but launch.json does not define it.'
+        })
+    }
+
+    return { resolvedInputValues, resolvedInputs, missingInputs }
+}
+
+function replaceInputReferences<T>(value: T, resolvedInputValues: Map<string, string>): T {
+    if (typeof value === 'string') {
+        return value.replace(INPUT_VARIABLE_PATTERN, (_match, id: string) => {
+            return resolvedInputValues.get(id) ?? _match
+        }) as T
+    }
+
+    if (Array.isArray(value)) {
+        return value.map(item => replaceInputReferences(item, resolvedInputValues)) as T
+    }
+
+    if (value && typeof value === 'object') {
+        const result: Record<string, unknown> = {}
+        for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+            result[key] = replaceInputReferences(item, resolvedInputValues)
+        }
+        return result as T
+    }
+
+    return value
+}
+
+function replaceInputReferencesInTasks(
+    tasksJson: any,
+    taskLabels: string[],
+    resolvedInputValues: Map<string, string>
+) {
+    const labelsToReplace = new Set(taskLabels)
+    const clonedTasksJson = {
+        ...tasksJson
+    }
+
+    if (!Array.isArray(tasksJson?.tasks)) {
+        return clonedTasksJson
+    }
+
+    clonedTasksJson.tasks = tasksJson.tasks.map((task: any) => {
+        if (!task || typeof task !== 'object' || typeof task.label !== 'string' || !labelsToReplace.has(task.label)) {
+            return task
+        }
+
+        return replaceInputReferences(task, resolvedInputValues)
+    })
+
+    return clonedTasksJson
 }
 
 function getActiveThreadId(): number | undefined {
@@ -572,14 +922,118 @@ export const startDebugTool = {
     },
     handler: async (args: any) => {
         const { config } = args
+        const providedInputValues = normalizeInputValues(args)
         try {
             const folder = vscode.workspace.workspaceFolders?.[0]
             if (!folder) {
                 return asTextContent(t('tools.noWorkspaceFolder'), true)
             }
 
+            let debugTarget: string | vscode.DebugConfiguration = config
+            let resolvedInputs: InputResolutionSummary[] = []
+            let inputReferences: string[] = []
+            let taskInputReferences: TaskInputReferenceSummary = {
+                labels: [],
+                missingLabels: [],
+                inputReferences: []
+            }
+            let usedResolvedConfiguration = false
+            let patchedTasksJson = false
+            let tasksJsonUri: vscode.Uri | undefined
+            let originalTasksJsonContent: Uint8Array | undefined
+            const hasProvidedInputs = Object.keys(providedInputValues).length > 0
+
             try {
-                const success = await vscode.debug.startDebugging(folder, config)
+                const launchJsonUri = vscode.Uri.joinPath(folder.uri, '.vscode', 'launch.json')
+                const launchJsonContent = await vscode.workspace.fs.readFile(launchJsonUri)
+                const launchJson = parseJsonWithComments(launchJsonContent.toString())
+                const configurations = Array.isArray(launchJson.configurations) ? launchJson.configurations : []
+                const selectedConfig = configurations.find((launchConfig: any) => launchConfig.name === config)
+                let tasksJson: any | undefined
+
+                try {
+                    tasksJsonUri = vscode.Uri.joinPath(folder.uri, '.vscode', 'tasks.json')
+                    originalTasksJsonContent = await vscode.workspace.fs.readFile(tasksJsonUri)
+                    tasksJson = parseJsonWithComments(originalTasksJsonContent.toString())
+                } catch {
+                    tasksJson = undefined
+                    tasksJsonUri = undefined
+                    originalTasksJsonContent = undefined
+                }
+
+                if (selectedConfig) {
+                    const launchInputsById = getLaunchInputsById(launchJson, tasksJson)
+                    const launchInputReferences = Array.from(collectInputReferences(selectedConfig))
+                    taskInputReferences = tasksJson && selectedConfig.preLaunchTask ?
+                        collectTaskInputReferences(tasksJson, selectedConfig.preLaunchTask) :
+                        taskInputReferences
+                    inputReferences = Array.from(new Set([
+                        ...launchInputReferences,
+                        ...taskInputReferences.inputReferences
+                    ]))
+
+                    if (inputReferences.length > 0 || hasProvidedInputs) {
+                        const resolution = resolveLaunchInputs(inputReferences, launchInputsById, providedInputValues)
+                        resolvedInputs = resolution.resolvedInputs
+
+                        if (resolution.missingInputs.length > 0) {
+                            return asJsonContent({
+                                requestedConfig: config,
+                                started: false,
+                                message: 'Debug configuration requires launch/task inputs before it can start.',
+                                inputReferences,
+                                taskInputReferences,
+                                missingInputs: resolution.missingInputs,
+                                inputs: inputReferences.map(id => summarizeLaunchInput(launchInputsById.get(id), id)),
+                                hint: 'Call start-debug with {"inputs":{"inputId":"value"}} or add a default value to launch.json/tasks.json inputs.'
+                            }, true)
+                        }
+
+                        if (launchInputReferences.length > 0) {
+                            debugTarget = replaceInputReferences(selectedConfig, resolution.resolvedInputValues) as vscode.DebugConfiguration
+                            usedResolvedConfiguration = true
+                        }
+
+                        if (tasksJson && tasksJsonUri && originalTasksJsonContent && taskInputReferences.inputReferences.length > 0) {
+                            const replacedTasksJson = replaceInputReferencesInTasks(
+                                tasksJson,
+                                taskInputReferences.labels,
+                                resolution.resolvedInputValues
+                            )
+                            await vscode.workspace.fs.writeFile(
+                                tasksJsonUri,
+                                Buffer.from(JSON.stringify(replacedTasksJson, null, 2))
+                            )
+                            patchedTasksJson = true
+                            try {
+                                await vscode.tasks.fetchTasks()
+                                await sleep(200)
+                            } catch (taskRefreshError) {
+                                console.error('[start-debug] Failed to refresh tasks after input substitution:', taskRefreshError)
+                            }
+                        }
+                    }
+                } else if (hasProvidedInputs) {
+                    return asJsonContent({
+                        requestedConfig: config,
+                        started: false,
+                        message: `Debug configuration "${config}" not found in launch.json, so launch inputs cannot be applied.`,
+                        availableConfigs: configurations.map((launchConfig: any) => launchConfig.name).filter(Boolean)
+                    }, true)
+                }
+            } catch (launchError: any) {
+                if (hasProvidedInputs) {
+                    return asJsonContent({
+                        requestedConfig: config,
+                        started: false,
+                        message: 'Unable to read launch.json, so launch inputs cannot be applied.',
+                        error: launchError?.message || String(launchError)
+                    }, true)
+                }
+            }
+
+            try {
+                const success = await vscode.debug.startDebugging(folder, debugTarget)
                 const session = await waitForDebugSession(
                     started => started.name === config && started.workspaceFolder?.uri.fsPath === folder.uri.fsPath,
                     5000
@@ -587,6 +1041,11 @@ export const startDebugTool = {
 
                 return asJsonContent({
                     requestedConfig: config,
+                    usedResolvedConfiguration,
+                    patchedTasksJson,
+                    inputReferences,
+                    taskInputReferences,
+                    resolvedInputs,
                     started: success || !!session,
                     acknowledgedByVsCode: success,
                     sessionStarted: !!session,
@@ -606,6 +1065,11 @@ export const startDebugTool = {
                 if (session) {
                     return asJsonContent({
                         requestedConfig: config,
+                        usedResolvedConfiguration,
+                        patchedTasksJson,
+                        inputReferences,
+                        taskInputReferences,
+                        resolvedInputs,
                         started: true,
                         acknowledgedByVsCode: false,
                         sessionStarted: true,
@@ -621,6 +1085,14 @@ export const startDebugTool = {
                 }
 
                 throw error
+            } finally {
+                if (patchedTasksJson && tasksJsonUri && originalTasksJsonContent) {
+                    try {
+                        await vscode.workspace.fs.writeFile(tasksJsonUri, originalTasksJsonContent)
+                    } catch (restoreError) {
+                        console.error('[start-debug] Failed to restore tasks.json after input substitution:', restoreError)
+                    }
+                }
             }
         } catch (error: any) {
             return asErrorContent(error)
@@ -1007,16 +1479,24 @@ export const listDebugConfigsTool = {
                     }
                 }
                 
+                let tasksJson: any | undefined
+                try {
+                    const tasksJsonUri = vscode.Uri.joinPath(workspaceFolder.uri, '.vscode', 'tasks.json')
+                    const tasksJsonContent = await vscode.workspace.fs.readFile(tasksJsonUri)
+                    tasksJson = parseJsonWithComments(tasksJsonContent.toString())
+                } catch {
+                    tasksJson = undefined
+                }
+
+                const launchInputsById = getLaunchInputsById(launchJson, tasksJson)
+
                 if (launchJson.configurations && Array.isArray(launchJson.configurations)) {
-                    const configs = launchJson.configurations.map((config: any, index: number) => ({
-                        name: config.name || `Configuration ${index + 1}`,
-                        type: config.type || 'unknown',
-                        request: config.request || 'unknown',
-                        program: config.program || config.args?.[0] || 'not specified',
-                        cwd: config.cwd || 'not specified',
-                        env: config.env || {},
-                        args: config.args || []
-                    }))
+                    const configs = launchJson.configurations.map((config: any, index: number) => {
+                        const taskInputReferences = tasksJson && config.preLaunchTask ?
+                            collectTaskInputReferences(tasksJson, config.preLaunchTask) :
+                            undefined
+                        return summarizeDebugConfig(config, index, launchInputsById, taskInputReferences)
+                    })
                     
                     return { 
                         content: [{ 
@@ -1024,6 +1504,7 @@ export const listDebugConfigsTool = {
                             text: JSON.stringify({
                                 workspace: workspaceFolder.name,
                                 configurations: configs,
+                                inputs: Array.from(launchInputsById.values()).map(input => summarizeLaunchInput(input)),
                                 total: configs.length
                             }, null, 2) 
                         }] 
@@ -1090,23 +1571,27 @@ export const selectDebugConfigTool = {
                 const launchJson = parseJsonWithComments(launchJsonContent.toString())
                 
                 if (launchJson.configurations && Array.isArray(launchJson.configurations)) {
+                    let tasksJson: any | undefined
+                    try {
+                        const tasksJsonUri = vscode.Uri.joinPath(workspaceFolder.uri, '.vscode', 'tasks.json')
+                        const tasksJsonContent = await vscode.workspace.fs.readFile(tasksJsonUri)
+                        tasksJson = parseJsonWithComments(tasksJsonContent.toString())
+                    } catch {
+                        tasksJson = undefined
+                    }
+                    const launchInputsById = getLaunchInputsById(launchJson, tasksJson)
                     const selectedConfig = launchJson.configurations.find((config: any) => config.name === configName)
                     
                     if (selectedConfig) {
+                        const taskInputReferences = tasksJson && selectedConfig.preLaunchTask ?
+                            collectTaskInputReferences(tasksJson, selectedConfig.preLaunchTask) :
+                            undefined
                         return { 
                             content: [{ 
                                 type: 'text' as const, 
                                 text: JSON.stringify({
                                     message: `Debug configuration "${configName}" selected`,
-                                    configuration: {
-                                        name: selectedConfig.name,
-                                        type: selectedConfig.type || 'unknown',
-                                        request: selectedConfig.request || 'unknown',
-                                        program: selectedConfig.program || selectedConfig.args?.[0] || 'not specified',
-                                        cwd: selectedConfig.cwd || 'not specified',
-                                        env: selectedConfig.env || {},
-                                        args: selectedConfig.args || []
-                                    }
+                                    configuration: summarizeDebugConfig(selectedConfig, 0, launchInputsById, taskInputReferences)
                                 }, null, 2) 
                             }] 
                         }

@@ -25,7 +25,9 @@ export const inputSchemas = {
         files: z.array(z.string()).optional().describe('Array of relative paths from workspace root')
     },
     'start-debug': {
-        config: z.string().describe('Configuration name from launch.json')
+        config: z.string().describe('Configuration name from launch.json'),
+        inputs: z.record(z.union([z.string(), z.number(), z.boolean()])).optional().describe('Values for ${input:id} variables in launch.json or preLaunchTask tasks.json'),
+        inputValues: z.record(z.union([z.string(), z.number(), z.boolean()])).optional().describe('Alias for inputs; values for ${input:id} variables in launch.json or preLaunchTask tasks.json')
     },
     'evaluate-expression': {
         expression: z.string().describe('Expression to evaluate in debug context'),
